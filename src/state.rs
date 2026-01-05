@@ -33,6 +33,7 @@ pub struct State {
 //    depth_texture: crate::texture::Texture,
     sample_count: u32,
     multisampled_framebuffer: Option<wgpu::TextureView>,
+    outline_pipeline: wgpu::RenderPipeline,
     pub window: Arc<Window>,
 
 
@@ -235,7 +236,12 @@ impl State {
         let stencil_pipeline = stencil_pipeline_struct.pipeline;
 
 
+        // Outline Stencil pipeline
 
+        let outline_pipeline_struct =
+            Pipeline::outline_pipeline(&device, &config, &camera_bind_group_layout, &spin_bind_group_layout, sample_count)?;
+
+        let outline_pipeline = outline_pipeline_struct.pipeline;
 
         Ok(Self {
             surface,
@@ -263,6 +269,7 @@ impl State {
             spin_buffer,
             sample_count,
             multisampled_framebuffer,
+            outline_pipeline,
 //            depth_texture,
             window,
         })
@@ -388,6 +395,77 @@ impl State {
 
         drop(stencil_pass);
 
+        // /
+        // /   O U T L I N E   S T E N C I L
+        // /
+
+        // Write Camera buffer
+        self.queue.write_buffer(
+            &self.camera_buffer,
+            0,
+            bytemuck::cast_slice(&[self.camera_uniform]),
+        );
+
+
+        let outline_pass_color_attachments = match &self.multisampled_framebuffer {
+            Some(texture_view) => {
+                wgpu::RenderPassColorAttachment {
+                    view: texture_view,
+                    depth_slice: None,
+                    resolve_target: Some(&view),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, 
+                        store: wgpu::StoreOp::Store,
+                    },
+                }
+            }
+            None => wgpu::RenderPassColorAttachment {
+                view: &view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color{ 
+                        r: 0.67, 
+                        g: 0.27, 
+                        b: 0.15, 
+                        a: 1. }), // <- DO NOT CLEAR
+                    store: wgpu::StoreOp::Store,
+                },
+            },
+        };
+
+        let outline_depth_stencil_attachment = wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth_stencil.view,
+              //  view: &self.depth_texture.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.), // <- clear depth again
+                    store: wgpu::StoreOp::Store,
+                }),
+
+                stencil_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Load, // <- keep mask
+                store: wgpu::StoreOp::Store,
+                }) ,
+            };
+
+        let mut outline_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("outline Pass"),
+                color_attachments: &[Some(outline_pass_color_attachments)],
+                depth_stencil_attachment: Some(outline_depth_stencil_attachment),
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+        });
+
+        outline_pass.set_pipeline(&self.outline_pipeline);
+        outline_pass.set_stencil_reference(1);
+        outline_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+        outline_pass.set_bind_group(1, &self.spin_bind_group, &[]);
+        outline_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+
+        outline_pass.draw_mesh_instanced(&self.obj_model.meshes[0], 0..self.instances.len() as u32);
+
+        drop(outline_pass);
 
         // /
         // T O T A L  S C E N E
@@ -418,16 +496,16 @@ impl State {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color{ 
-                        r: 0.77, 
-                        g: 0.57, 
-                        b: 0.35, 
-                        a: 1. }), // <- DO NOT CLEAR
+                    load: wgpu::LoadOp::Load,
+                    // Clear(wgpu::Color{ 
+                        // r: 0.77, 
+                        // g: 0.57, 
+                        // b: 0.35, 
+                        // a: 1. }), // <- DO NOT CLEAR
                     store: wgpu::StoreOp::Store,
                 },
             },
         };
-
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Total Scene Pass"),
             color_attachments: &[Some(render_pass_color_attachments)],

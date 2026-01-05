@@ -159,4 +159,87 @@ impl Pipeline {
         })
     }
 
+
+    pub fn outline_pipeline(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        camera_uniform_bind_group_layout: &wgpu::BindGroupLayout,
+        spin_uniform_bind_group_layout: &wgpu::BindGroupLayout,
+        sample_count: u32,
+    ) -> Result<Pipeline> {
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("stencil_expand"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/expand.wgsl").into()),
+        });
+
+        let mask_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("outline_pipeline_layout"),
+            bind_group_layouts: &[camera_uniform_bind_group_layout, spin_uniform_bind_group_layout],
+            immediate_size: 0,
+            //push_constant_ranges: &[],
+        });
+
+        let outline_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("outline_Render_Pipeline"),
+            layout: Some(&mask_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"), // 1.
+                buffers: &[ModelVertex::desc(), InstanceRaw::desc()], // 2.
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                // 3.
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    // 4.
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                cull_mode: Some(wgpu::Face::Front), // important
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth24PlusStencil8,
+                    depth_write_enabled: false,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: wgpu::StencilState {
+                        front: wgpu::StencilFaceState {
+                            compare: wgpu::CompareFunction::NotEqual,
+                            pass_op: wgpu::StencilOperation::Keep,
+                            fail_op: wgpu::StencilOperation::Keep,
+                            depth_fail_op: wgpu::StencilOperation::Keep,
+                        },
+                        back: wgpu::StencilFaceState::IGNORE,
+                        read_mask: 0xFF,
+                        write_mask: 0x00,
+                    },
+                    bias: wgpu::DepthBiasState {
+                        constant: 1, // helps z-fighting
+                        slope_scale: 1.0,
+                        clamp: 0.0,
+                    },
+                }),
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                ..Default::default()
+            },
+            multiview_mask: None,
+            //multiview: None,
+            cache: None,
+
+        });
+
+        Ok(Self {
+            pipeline: outline_pipeline,
+        })
+
+    }
+ 
 }
