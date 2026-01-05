@@ -29,6 +29,13 @@ impl App {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl Default for App {
+    fn default() -> Self {
+            Self::new()
+    }
+ }
+
 
 impl ApplicationHandler<State> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {

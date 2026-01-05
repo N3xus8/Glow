@@ -356,19 +356,19 @@ impl State {
 
         self.camera_uniform.update_view_proj(&self.camera);
 
-
-        //
-        // S T E N C I L   P A S S
-        //
-
-        // Write Camera buffer
+        // / W R I T E  C A M E R A  B U F F E R 
 
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
+        
         // /
+        //
+        // S T E N C I L   P A S S
+        //
+
 
         let mut stencil_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("stencil pass"),
@@ -398,13 +398,6 @@ impl State {
         // /
         // /   O U T L I N E   S T E N C I L
         // /
-
-        // Write Camera buffer
-        self.queue.write_buffer(
-            &self.camera_buffer,
-            0,
-            bytemuck::cast_slice(&[self.camera_uniform]),
-        );
 
 
         let outline_pass_color_attachments = match &self.multisampled_framebuffer {
@@ -471,13 +464,8 @@ impl State {
         // T O T A L  S C E N E
         // /
 
-        // Write Camera buffer
-        self.queue.write_buffer(
-            &self.camera_buffer,
-            0,
-            bytemuck::cast_slice(&[self.camera_uniform]),
-        );
 
+        
         //
         let render_pass_color_attachments = match &self.multisampled_framebuffer {
             Some(texture_view) => {

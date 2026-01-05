@@ -179,7 +179,18 @@ impl Pipeline {
             immediate_size: 0,
             //push_constant_ranges: &[],
         });
-
+        let outline_color_target = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::SrcAlpha,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+        };
         let outline_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("outline_Render_Pipeline"),
             layout: Some(&mask_pipeline_layout),
@@ -196,7 +207,8 @@ impl Pipeline {
                 targets: &[Some(wgpu::ColorTargetState {
                     // 4.
                     format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    //blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(outline_color_target),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             compilation_options: wgpu::PipelineCompilationOptions::default(),

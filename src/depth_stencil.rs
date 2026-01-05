@@ -23,7 +23,7 @@ impl StencilTexture {
             label: Some(label),
             size,
             mip_level_count: 1,
-            sample_count: sample_count,
+            sample_count,
             dimension: wgpu::TextureDimension::D2,
             format: depth_stencil_format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
