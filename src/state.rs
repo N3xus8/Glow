@@ -29,7 +29,7 @@ pub struct State {
     spin_buffer: wgpu::Buffer,
     spin_bind_group: wgpu::BindGroup,
     depth_stencil: StencilTexture,
-//    stencil_pipeline: wgpu::RenderPipeline,
+    stencil_pipeline: wgpu::RenderPipeline,
 //    depth_texture: crate::texture::Texture,
     sample_count: u32,
     multisampled_framebuffer: Option<wgpu::TextureView>,
@@ -228,6 +228,11 @@ impl State {
         )?;
         let render_pipeline = pipeline_struct.pipeline;        
 
+        // Stencil Pipeline
+        let stencil_pipeline_struct =
+            Pipeline::mask_render_pipeline(&device, &camera_bind_group_layout, &spin_bind_group_layout, sample_count)?;
+
+        let stencil_pipeline = stencil_pipeline_struct.pipeline;
 
 
 
@@ -250,6 +255,7 @@ impl State {
             camera_buffer,
             camera_controller,
             depth_stencil,
+            stencil_pipeline,
             last_frame,
             spin,
             spin_uniform,
@@ -343,6 +349,46 @@ impl State {
 
         self.camera_uniform.update_view_proj(&self.camera);
 
+
+        //
+        // S T E N C I L   P A S S
+        //
+
+        // Write Camera buffer
+
+        self.queue.write_buffer(
+            &self.camera_buffer,
+            0,
+            bytemuck::cast_slice(&[self.camera_uniform]),
+        );
+        // /
+
+        let mut stencil_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("stencil pass"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth_stencil.view,
+                depth_ops: None,
+                stencil_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(0),
+                    store: wgpu::StoreOp::Store,
+                }),
+            }),
+            occlusion_query_set: None,
+            timestamp_writes: None,
+            multiview_mask: None,
+        });
+        stencil_pass.set_stencil_reference(1);
+        stencil_pass.set_pipeline(&self.stencil_pipeline);
+        stencil_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+        stencil_pass.set_bind_group(1, &self.spin_bind_group, &[]);
+        stencil_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+
+        stencil_pass.draw_mesh_instanced(&self.obj_model.meshes[0], 0..self.instances.len() as u32);
+
+        drop(stencil_pass);
+
+
         // /
         // T O T A L  S C E N E
         // /
@@ -362,12 +408,7 @@ impl State {
                     depth_slice: None,
                     resolve_target: Some(&view),
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color{ 
-                            r: 0.6,
-                            g: 0.3,
-                            b: 0.1,
-                            a: 1.0,
-                        }), // <- DO NOT CLEAR
+                        load: wgpu::LoadOp::Load, 
                         store: wgpu::StoreOp::Store,
                     },
                 }
@@ -378,11 +419,10 @@ impl State {
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color{ 
-                            r: 0.6,
-                            g: 0.3,
-                            b: 0.1,
-                            a: 1.0,
-                        }), // <- DO NOT CLEAR
+                        r: 0.77, 
+                        g: 0.57, 
+                        b: 0.35, 
+                        a: 1. }), // <- DO NOT CLEAR
                     store: wgpu::StoreOp::Store,
                 },
             },
@@ -395,11 +435,14 @@ impl State {
                 view: &self.depth_stencil.view,
               //  view: &self.depth_texture.view,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0), // <- clear depth again
+                    load: wgpu::LoadOp::Clear(1.), // <- clear depth again
                     store: wgpu::StoreOp::Store,
                 }),
 
-                stencil_ops: None,
+                stencil_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Load, // <- keep mask
+                store: wgpu::StoreOp::Store,
+                }) ,
             }),
             occlusion_query_set: None,
             timestamp_writes: None,
@@ -408,6 +451,7 @@ impl State {
         });
 
         render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_stencil_reference(1);
         render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
         render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
         render_pass.set_bind_group(2, &self.spin_bind_group, &[]);

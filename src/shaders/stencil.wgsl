@@ -5,6 +5,12 @@ struct CameraUniform {
 @group(0) @binding(0) // 1.
 var<uniform> camera: CameraUniform;
 
+struct SpinUniform {
+    model:  mat4x4<f32>,
+}
+@group(1) @binding(0)
+var<uniform> spin: SpinUniform;
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) tex_coords: vec2<f32>, // Unused 
@@ -29,7 +35,7 @@ fn vs_main(in: VertexInput,  instance: InstanceInput,) -> @builtin(position) vec
     );
 
 
-    return camera.view_proj * model_matrix * vec4<f32>(in.position, 1.0);
+    return camera.view_proj * model_matrix * spin.model  * vec4<f32>(in.position, 1.0);
 }
 
  

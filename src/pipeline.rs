@@ -73,7 +73,7 @@ impl Pipeline {
                 //stencil: wgpu::StencilState::default(),
                 stencil: wgpu::StencilState {
                     front: wgpu::StencilFaceState {
-                        compare: wgpu::CompareFunction::Always,
+                        compare: wgpu::CompareFunction::Equal,
                         fail_op: wgpu::StencilOperation::Keep,
                         depth_fail_op: wgpu::StencilOperation::Keep,
                         pass_op: wgpu::StencilOperation::Keep,
@@ -96,6 +96,66 @@ impl Pipeline {
         });
         Ok(Self {
             pipeline: render_pipeline,
+        })
+    }
+
+       pub fn mask_render_pipeline(
+        device: &wgpu::Device,
+        camera_uniform_bind_group_layout: &wgpu::BindGroupLayout,
+        spin_uniform_bind_group_layout: &wgpu::BindGroupLayout,
+        sample_count: u32,
+    ) -> Result<Pipeline> {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("stencil"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/stencil.wgsl").into()),
+        });
+
+        let mask_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mask_pipeline_layout"),
+            bind_group_layouts: &[camera_uniform_bind_group_layout, spin_uniform_bind_group_layout],
+            immediate_size: 0,
+            //push_constant_ranges: &[],
+        });
+
+        let mask_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Mask_Render_Pipeline"),
+            layout: Some(&mask_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"), // 1.
+                buffers: &[ModelVertex::desc(), InstanceRaw::desc()], // 2.
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: None,
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState {
+                    front: wgpu::StencilFaceState {
+                        compare: wgpu::CompareFunction::Always,
+                        fail_op: wgpu::StencilOperation::Keep,
+                        depth_fail_op: wgpu::StencilOperation::Keep,
+                        pass_op: wgpu::StencilOperation::Replace,
+                    },
+                    back: wgpu::StencilFaceState::IGNORE,
+                    read_mask: 0xFF,
+                    write_mask: 0xFF,
+                },
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                ..Default::default()
+            },
+            multiview_mask: None,
+            //multiview: None,
+            cache: None,
+        });
+
+        Ok(Self {
+            pipeline: mask_render_pipeline,
         })
     }
 
