@@ -194,6 +194,7 @@ impl ColorTexture {
             config: &wgpu::SurfaceConfiguration,
             label: &str,
             sample_count: u32,
+            is_hdr: bool,
         ) 
         -> Self {
 
@@ -203,7 +204,7 @@ impl ColorTexture {
             depth_or_array_layers: 1,
         };
 
-
+        let texture_format = if is_hdr {wgpu::TextureFormat::Rgba16Float} else {config.format };
         let usage = if sample_count == 1 {wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING} else {wgpu::TextureUsages::RENDER_ATTACHMENT};
         // This is your internal "canvas"
         let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -213,13 +214,13 @@ impl ColorTexture {
             sample_count, 
             dimension: wgpu::TextureDimension::D2,
             // Use the same format as your surface (e.g., Bgra8UnormSrgb)
-            format: config.format,
-            //format: wgpu::TextureFormat::Rgba16Float,
+            //format: config.format,
+            format: texture_format ,
             // USAGE IS KEY: 
             // RENDER_ATTACHMENT so we can draw to it in Pass 1.
             // TEXTURE_BINDING so the Edge Shader can read it in Pass 2.
-            //usage: usage,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: usage,
+            //usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
 

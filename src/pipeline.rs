@@ -13,7 +13,11 @@ impl Pipeline {
         texture_bind_group_layout: &wgpu::BindGroupLayout,
         camera_uniform_bind_group_layout: &wgpu::BindGroupLayout,
         spin_uniform_bind_group_layout: &wgpu::BindGroupLayout,
+        is_hdr: bool,
     ) -> Result<Pipeline> {
+
+        let texture_format = if is_hdr {wgpu::TextureFormat::Rgba16Float} else {config.format };
+
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shader.wgsl").into()),
@@ -21,7 +25,7 @@ impl Pipeline {
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
+                label: Some("Scene Render Pipeline Layout"),
                 bind_group_layouts: &[
                     texture_bind_group_layout,
                     camera_uniform_bind_group_layout,
@@ -34,7 +38,7 @@ impl Pipeline {
         //Pipeline
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
+            label: Some("Scene Render Pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -48,9 +52,11 @@ impl Pipeline {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     // 4.
-                    format: config.format,
+                    //format: config.format,
+                    format: texture_format,
                     //blend: None,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    //blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -167,7 +173,11 @@ impl Pipeline {
         camera_uniform_bind_group_layout: &wgpu::BindGroupLayout,
         spin_uniform_bind_group_layout: &wgpu::BindGroupLayout,
         sample_count: u32,
+        is_hdr: bool,
     ) -> Result<Pipeline> {
+
+        let texture_format = if is_hdr {wgpu::TextureFormat::Rgba16Float} else {config.format };
+
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("stencil_expand"),
@@ -207,10 +217,11 @@ impl Pipeline {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     // 4.
-                    format: config.format,
+                    //format: config.format,
+                    format: texture_format,
                     //blend: Some(wgpu::BlendState::REPLACE),
-                    //blend: Some(outline_color_target),
-                    blend: None,
+                    blend: Some(outline_color_target),
+                    //blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -268,8 +279,11 @@ impl Pipeline {
   pub fn blur_pipeline (
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
-        blur_bind_group_layout:wgpu::BindGroupLayout, 
+        blur_bind_group_layout:wgpu::BindGroupLayout,
+        is_hdr: bool,
         ) -> Result<Pipeline> {
+
+        let texture_format = if is_hdr {wgpu::TextureFormat::Rgba16Float} else {config.format };
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("blur shader"),
@@ -296,7 +310,8 @@ impl Pipeline {
                     module: &shader,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: config.format,
+                        //format: config.format,
+                        format: texture_format,
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -319,8 +334,11 @@ impl Pipeline {
   pub fn composite_pipeline (
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
-        composite_bind_group_layout:wgpu::BindGroupLayout, 
+        composite_bind_group_layout:wgpu::BindGroupLayout,
+        is_hdr: bool, 
         ) -> Result<Pipeline> {
+
+        let texture_format = if is_hdr {wgpu::TextureFormat::Rgba16Float} else {config.format };
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("composite shader"),
@@ -349,8 +367,11 @@ impl Pipeline {
                 module: &shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format, // swapchain format
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    //format: config.format, // swapchain format
+                    format: texture_format,
+                    blend: None,
+                    //blend: Some(wgpu::BlendState::REPLACE),
+                    //blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -368,6 +389,50 @@ impl Pipeline {
         Ok(Self { pipeline: composite_pipeline })
     }
 
+    pub fn tone_map_pipeline(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        tone_map_bind_group_layout:wgpu::BindGroupLayout,
+
+    ) -> Result<Pipeline> {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("tone map shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/hdr_lite.wgsl").into()),
+        });
 
 
+        let tone_map_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("tone map pipeline layout"),
+            bind_group_layouts: &[&tone_map_bind_group_layout],
+            immediate_size: 0,
+        });
+
+        let tone_map_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Tone Map Pipeline"),
+            layout: Some(&tone_map_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format, // Bgra8UnormSrgb
+                    blend: None,            // IMPORTANT
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        
+        Ok(Self{ pipeline: tone_map_pipeline})
+    }
 }

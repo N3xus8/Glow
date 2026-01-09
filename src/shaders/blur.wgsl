@@ -5,6 +5,7 @@ struct VertexOutput {
 
 struct BlurParams {
     direction: vec2<f32>, // (1,0) = horizontal, (0,1) = vertical
+    _padding: vec2<f32>,
 };
 
 @group(0) @binding(0) var t_input: texture_2d<f32>;
@@ -31,7 +32,7 @@ fn vs_main(@builtin(vertex_index) idx: u32) -> VertexOutput {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let size_u = textureDimensions(t_input);
     let size = vec2<f32>(f32(size_u.x), f32(size_u.y));
-    let texel = params.direction * 2.3 / size;
+    let texel = params.direction * 2.5 / size;
 
     var sum = vec4<f32>(0.0);
 

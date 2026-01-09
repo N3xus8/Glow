@@ -29,22 +29,6 @@ fn vs_main(@builtin(vertex_index) idx: u32) -> VertexOutput {
 @group(0) @binding(2) var t_bloom: texture_2d<f32>;
 @group(0) @binding(3) var s_sampler: sampler;
 
-// @fragment
-// fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-//     let scene   = textureSample(t_scene,   s_sampler, in.uv);
-//     let outline = textureSample(t_outline, s_sampler, in.uv);
-//     let bloom   = textureSample(t_bloom,   s_sampler, in.uv);
-
-//     // Use ALPHA as the mask
-//    let composed = mix(scene, vec4(outline.rgb, 1.0), outline.a);
-//     // Add glow
-//     //return composed + bloom * 12;
-//     return composed + bloom * 2.0;
-//     //return outline;
-//     //return textureSample(t_scene, s_sampler, in.uv);
-//     //return vec4(vec3(outline.a), 1.0);
-// }
-
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let scene   = textureSample(t_scene,   s_sampler, in.uv);
@@ -52,15 +36,22 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let bloom   = textureSample(t_bloom,   s_sampler, in.uv);
 
     // Hard outline compositing (mask-based)
-    let composed =
-        scene * (1.0 - outline.a) +
-        vec4(outline.rgb, 1.0) * outline.a;
+
 
     // Additive bloom
-    //return scene + bloom * 2.;
-    //return vec4(scene.rgb + bloom.rgb *2., 1.0);
-    //return   scene  + outline ;
-    //return vec4(vec3(outline.a), 1.0);
-    return    scene  + bloom * 2.35 ;
-    //return    scene ;
+ 
+ 
+    //return    scene + bloom * 1. ;
+    //return    scene  ;
+
+    let bloom_strength = 1.7 ;
+
+    let scene_rgb = scene.rgb;
+    let bloom_rgb = bloom.rgb + vec3(0.0, 0.0, 0.0);
+
+    let color = scene_rgb + bloom_rgb * bloom_strength;
+
+    return vec4(color, 1.0);
+    //return bloom;
+
 }

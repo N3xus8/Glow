@@ -4,7 +4,7 @@ use instant::Instant;
 use wgpu::BindGroup;
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
-use crate::{camera::{Camera, CameraController, CameraUniform, bind_group_for_camera_uniform, create_camera_buffer}, depth_stencil::{self, StencilTexture}, extra::{self, BlurParams, Spin, SpinUniform, create_blur_bind_group, create_blur_bind_group_layout, create_composite_bind_group_layout, create_linear_sampler}, model::{DrawModel, Instance, Model, create_instance_buffer}, pipeline::Pipeline, resources, texture::{ColorTexture, create_multisampled_view}};
+use crate::{camera::{Camera, CameraController, CameraUniform, bind_group_for_camera_uniform, create_camera_buffer}, depth_stencil::{self, StencilTexture}, extra::{self, BlurParams, Spin, SpinUniform, create_blur_bind_group, create_blur_bind_group_layout, create_composite_bind_group_layout, create_linear_sampler, create_tone_map_bind_group, create_tone_map_bind_group_layout}, model::{DrawModel, Instance, Model, create_instance_buffer}, pipeline::Pipeline, resources, texture::{ColorTexture, create_multisampled_view}};
 use crate::extra::create_composite_bind_group;
 
 pub struct State {
@@ -45,6 +45,10 @@ pub struct State {
     scene_color_texture: Option<ColorTexture>,
     composite_bind_group: Option<BindGroup>,
     composite_pipeline: wgpu::RenderPipeline,
+    composite_texture: Option<ColorTexture>,
+    is_hdr: bool,
+    tone_map_bind_group: Option<BindGroup>,
+    tone_map_pipeline: wgpu::RenderPipeline,
     pub window: Arc<Window>,
 
 
@@ -129,7 +133,8 @@ impl State {
         };
 
         // /
-        let sample_count: u32 = 4;
+        let sample_count: u32 = 1;
+        let is_hdr = true;
 
         // /  
         // /
@@ -241,7 +246,16 @@ impl State {
 
         let scene_color_texture= None;
 
+        // / C O M P O S I T E 
+
         let composite_bind_group = None;
+
+        let composite_texture = None ;
+
+        // / T O N E  M A P 
+
+        let tone_map_bind_group = None ;
+
         // /
         // /      P I P E L I N E S
         // /
@@ -254,6 +268,7 @@ impl State {
             &diffuse_bind_group_layout,
             &camera_bind_group_layout,
             &spin_bind_group_layout,
+            is_hdr,
         )?;
         let render_pipeline = pipeline_struct.pipeline;        
 
@@ -267,7 +282,7 @@ impl State {
         // Outline Stencil pipeline
 
         let outline_pipeline_struct =
-            Pipeline::outline_pipeline(&device, &config, &camera_bind_group_layout, &spin_bind_group_layout, sample_count)?;
+            Pipeline::outline_pipeline(&device, &config, &camera_bind_group_layout, &spin_bind_group_layout, sample_count, is_hdr)?;
 
         let outline_pipeline = outline_pipeline_struct.pipeline;
 
@@ -275,14 +290,20 @@ impl State {
 
         let blur_bind_group_layout = create_blur_bind_group_layout(&device);
 
-        let blur_pipeline_struct = Pipeline::blur_pipeline(&device, &config, blur_bind_group_layout)?;
+        let blur_pipeline_struct = Pipeline::blur_pipeline(&device, &config, blur_bind_group_layout, is_hdr)?;
         let blur_pipeline = blur_pipeline_struct.pipeline;
 
         // Composite pipeline 
 
         let composite_bind_group_layout = create_composite_bind_group_layout(&device);
-        let composite_pipeline_struct = Pipeline::composite_pipeline(&device, &config, composite_bind_group_layout)?;
+        let composite_pipeline_struct = Pipeline::composite_pipeline(&device, &config, composite_bind_group_layout, is_hdr)?;
         let composite_pipeline =composite_pipeline_struct.pipeline;
+
+        // Tone Map pipeline
+
+        let tone_map_bind_group_layout = create_tone_map_bind_group_layout(&device);
+        let tone_map_pipeline_struct  = Pipeline::tone_map_pipeline(&device, &config, tone_map_bind_group_layout)?;
+        let tone_map_pipeline = tone_map_pipeline_struct.pipeline;
 
         Ok(Self {
             surface,
@@ -322,6 +343,10 @@ impl State {
             scene_color_texture,
             composite_bind_group,
             composite_pipeline,
+            composite_texture,
+            is_hdr,
+            tone_map_bind_group,
+            tone_map_pipeline,
             window,
         })
     }
@@ -349,15 +374,17 @@ impl State {
                 &self.device, 
                 &self.config, 
                 "Color Texture",
-                self.sample_count));
+                self.sample_count,
+                self.is_hdr,
+            ));
 
-            self.resolve_texture = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Resolve Color  Texture", 1)); 
+            self.resolve_texture = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Resolve Color  Texture", 1, self.is_hdr,)); 
             
-            self.blur_intermediate_texture = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Blur Intermediate Color Texture", 1));
+            self.blur_intermediate_texture = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Blur Intermediate Color Texture", 1, self.is_hdr,));
             
-            self.outline_bloom_texture  = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Bloom Color Texture", 1));
+            self.outline_bloom_texture  = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Bloom Color Texture", 1, self.is_hdr,));
             
-            self.scene_color_texture  = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Scene Color Texture", 1));
+            self.scene_color_texture  = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Scene Color Texture", 1, self.is_hdr,));
 
             let blur_bind_group_layout = create_blur_bind_group_layout(&self.device);
 
@@ -397,6 +424,24 @@ impl State {
             &self.outline_bloom_texture.as_ref().ok_or("cannot get texture").unwrap().view,
             &self.resolve_texture.as_ref().ok_or("cannot get texture").unwrap().view,
             &self.linear_sampler));
+        
+        self.composite_texture = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Composite Color Texture", 1, self.is_hdr,));
+        
+
+        // / T O N E  M A P 
+
+        let tone_map_bind_group_layout = create_tone_map_bind_group_layout(&self.device);
+
+        self.tone_map_bind_group = Some(create_tone_map_bind_group(
+            &self.device, 
+            &tone_map_bind_group_layout,
+            &self.composite_texture.as_ref().ok_or("cannot get texture").unwrap().view,
+            &self.linear_sampler,
+        ));
+
+
+
+
 
 
         }
@@ -510,10 +555,11 @@ impl State {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
+                          //  load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         load: wgpu::LoadOp::Clear(wgpu::Color{ 
-                            r: 0.67, 
-                            g: 0.27, 
-                            b: 0.15, 
+                            r: 0.35, 
+                            g: 0.17, 
+                            b: 0.05, 
                             a: 1. }), // <- DO NOT CLEAR
                         store: wgpu::StoreOp::Store,
                     },
@@ -577,6 +623,7 @@ impl State {
             0,
             bytemuck::bytes_of(&BlurParams {
                 direction: [1.0, 0.0],
+                _padding: [0.0; 2]
             }),
         );
 
@@ -611,6 +658,7 @@ impl State {
             0,
             bytemuck::bytes_of(&BlurParams {
                 direction: [0.0, 1.0],
+                _padding: [0.0; 2]
             }),
         );
 
@@ -713,7 +761,7 @@ impl State {
         let mut composite_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("composite pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view, // ⬅ swapchain
+                view: &self.composite_texture.as_ref().ok_or(wgpu::SurfaceError::Lost)?.view, 
                 resolve_target: None,
                 depth_slice: None,
                 ops: wgpu::Operations {
@@ -734,6 +782,28 @@ impl State {
         drop(composite_pass);
 
 
+        // / T O N E  M A P   P A S S 
+
+        let mut tone_map_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Tone Map Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view, // ⬅ swapchain
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+
+        tone_map_pass.set_pipeline(&self.tone_map_pipeline);
+        tone_map_pass.set_bind_group(0, &self.tone_map_bind_group, &[]);
+        tone_map_pass.draw(0..3, 0..1);
+
+        drop(tone_map_pass);
 
         // submit will accept anything that implements IntoIter
         self.queue.submit(std::iter::once(encoder.finish()));

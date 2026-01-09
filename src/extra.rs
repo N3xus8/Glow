@@ -172,13 +172,15 @@ impl MirrorPlaneUniform {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Default)]
 pub struct BlurParams {
    pub direction: [f32; 2],
+   pub _padding: [f32; 2], // 8 extra bytes → total 16 bytes
+   
 }
 
 
 impl BlurParams {
 
     pub fn new(x:f32, y: f32) -> Self {
-        Self { direction: [x,y] }
+        Self { direction: [x,y], _padding: [0.0; 2] }
     }
 
     pub fn create_blurparams_uniform_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
@@ -378,6 +380,60 @@ impl BlurParams {
                 ],
             })
 
+    }
 
+    pub fn create_tone_map_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout{
+        
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Tone Map Bind Group Layout"),
+            entries: &[
+                // HDR texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                // Sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(
+                        wgpu::SamplerBindingType::Filtering,
+                    ),
+                    count: None,
+                },
+            ],
+        })
 
-        }
+    }
+
+    pub fn create_tone_map_bind_group(
+             device: &wgpu::Device, 
+             tone_map_bind_group_layout: &wgpu::BindGroupLayout,
+             composed_texture_view: &wgpu::TextureView,
+             linear_sampler: &wgpu::Sampler,      
+    ) -> wgpu::BindGroup {
+
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Tone Map Bind Group"),
+            layout: &tone_map_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        &composed_texture_view
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&linear_sampler),
+                },
+            ],
+        })
+
+    }
