@@ -165,3 +165,219 @@ impl MirrorPlaneUniform {
         })
     }
 }
+
+
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Default)]
+pub struct BlurParams {
+   pub direction: [f32; 2],
+}
+
+
+impl BlurParams {
+
+    pub fn new(x:f32, y: f32) -> Self {
+        Self { direction: [x,y] }
+    }
+
+    pub fn create_blurparams_uniform_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
+            
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("blur params buffer"),
+                size: std::mem::size_of::<BlurParams>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+    }
+}
+
+    pub fn create_blur_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("blur bind group layout"),
+            entries: &[
+                // Input texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                // Sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(
+                        wgpu::SamplerBindingType::Filtering
+                    ),
+                    count: None,
+                },
+                // Blur params
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        })
+
+
+    }
+
+    pub fn create_blur_bind_group(
+            device: &wgpu::Device, 
+            blur_bind_group_layout: &wgpu::BindGroupLayout,
+            texture_view: &wgpu::TextureView,
+            linear_sampler: &wgpu::Sampler,
+            blur_params_buffer: &wgpu::Buffer,
+        ) -> wgpu::BindGroup {
+
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("blur bind group"),
+            layout: &blur_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&linear_sampler),
+                },
+                // Blur params uniform
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: blur_params_buffer.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
+    pub fn create_linear_sampler(device: &wgpu::Device) -> wgpu::Sampler {
+
+        device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("linear sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 32.0,
+            compare: None,               // IMPORTANT: not a comparison sampler
+            anisotropy_clamp: 1,
+            border_color: None,
+        })
+    }
+
+
+
+    pub fn create_composite_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("composite bind group layout"),
+        entries: &[
+            // Scene color
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
+                count: None,
+            },
+            // Outline (hard)
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
+                count: None,
+            },
+            // Bloom texture
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
+                count: None,
+            },
+            // Sampler
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(
+                    wgpu::SamplerBindingType::Filtering
+                ),
+                count: None,
+            },
+        ],
+    })
+    }
+
+
+    pub fn create_composite_bind_group(        
+            device: &wgpu::Device, 
+            composite_bind_group_layout: &wgpu::BindGroupLayout,
+            scene_texture_view: &wgpu::TextureView,
+            bloom_texture_view: &wgpu::TextureView,
+            outline_resolved_texture_view: &wgpu::TextureView,
+            linear_sampler: &wgpu::Sampler,
+        ) -> wgpu::BindGroup {
+    
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("composite bind group"),
+                layout: &composite_bind_group_layout,
+                entries: &[
+                    // Scene color texture
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(
+                            &scene_texture_view,
+                        ),
+                    },
+                    // Hard outline
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(
+                           outline_resolved_texture_view
+                        ),
+                    },
+                    // Bloom texture (final vertical blur output)
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(
+                            &bloom_texture_view,
+                        ),
+                    },
+                    // Shared linear sampler
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Sampler(
+                            &linear_sampler,
+                        ),
+                    },
+                ],
+            })
+
+
+
+        }

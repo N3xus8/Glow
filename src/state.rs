@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use instant::Instant;
+use wgpu::BindGroup;
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
-use crate::{camera::{Camera, CameraController, CameraUniform, bind_group_for_camera_uniform, create_camera_buffer}, depth_stencil::{self, StencilTexture}, extra::{Spin, SpinUniform}, model::{DrawModel, Instance, Model, create_instance_buffer}, pipeline::Pipeline, resources, texture::create_multisampled_view};
-
+use crate::{camera::{Camera, CameraController, CameraUniform, bind_group_for_camera_uniform, create_camera_buffer}, depth_stencil::{self, StencilTexture}, extra::{self, BlurParams, Spin, SpinUniform, create_blur_bind_group, create_blur_bind_group_layout, create_composite_bind_group_layout, create_linear_sampler}, model::{DrawModel, Instance, Model, create_instance_buffer}, pipeline::Pipeline, resources, texture::{ColorTexture, create_multisampled_view}};
+use crate::extra::create_composite_bind_group;
 
 pub struct State {
     pub surface: wgpu::Surface<'static>,
@@ -13,7 +14,7 @@ pub struct State {
     pub config: wgpu::SurfaceConfiguration,
     pub is_surface_configured: bool,
     pub render_pipeline: wgpu::RenderPipeline,
-        is_space_pressed: bool,
+        is_paused: bool,
     pub diffuse_bind_group: wgpu::BindGroup,
     obj_model: Model,
     camera: Camera,
@@ -30,10 +31,20 @@ pub struct State {
     spin_bind_group: wgpu::BindGroup,
     depth_stencil: StencilTexture,
     stencil_pipeline: wgpu::RenderPipeline,
-//    depth_texture: crate::texture::Texture,
     sample_count: u32,
-    multisampled_framebuffer: Option<wgpu::TextureView>,
+    color_texture: Option<ColorTexture>,
+    resolve_texture: Option<ColorTexture>,
     outline_pipeline: wgpu::RenderPipeline,
+    blur_params_uniform_buffer: wgpu::Buffer,
+    blur_outline_resolved_bind_group: Option<BindGroup>,
+    blur_inter_bind_group: Option<BindGroup>,
+    blur_intermediate_texture: Option<ColorTexture>,
+    outline_bloom_texture: Option<ColorTexture>,
+    linear_sampler: wgpu::Sampler,
+    blur_pipeline: wgpu::RenderPipeline,
+    scene_color_texture: Option<ColorTexture>,
+    composite_bind_group: Option<BindGroup>,
+    composite_pipeline: wgpu::RenderPipeline,
     pub window: Arc<Window>,
 
 
@@ -118,7 +129,7 @@ impl State {
         };
 
         // /
-        let sample_count: u32 = 1;
+        let sample_count: u32 = 4;
 
         // /  
         // /
@@ -192,6 +203,15 @@ impl State {
             sample_count,
         );
 
+        // / C O L O R  T E X T U R E 
+
+        //let color_texture = ColorTexture::create_color_texture(&device, &config, "Color Texture", sample_count);
+        let color_texture = None;
+
+        // /  R E S O L V E   T E X T U R E 
+        // /
+        let resolve_texture = None;
+
         // / S P I N
 
         let last_frame = Instant::now();
@@ -201,19 +221,27 @@ impl State {
         let (spin_bind_group_layout, spin_bind_group) =
             SpinUniform::bind_group_for_spin_uniform(&spin_buffer, &device);
 
-        // /
-        // / MultiSample Framebuffer
+        // /  B L U R  F O R  G L O W 
 
-        let multisampled_framebuffer: Option<wgpu::TextureView> = if sample_count > 1 {
-            Some(crate::texture::create_multisampled_view(
-                &device,
-                &config,
-                sample_count,
-            ))
-        } else {
-            None
-        };
+        // // (1,0) = horizontal, (0,1) = vertical
 
+        let blur_params = BlurParams::new(1., 0.);
+
+        let blur_params_uniform_buffer = blur_params.create_blurparams_uniform_buffer(&device);
+
+        let linear_sampler = create_linear_sampler(&device);
+
+        let blur_outline_resolved_bind_group = None;
+
+        let blur_inter_bind_group = None;
+
+        let blur_intermediate_texture = None;
+
+        let outline_bloom_texture = None;
+
+        let scene_color_texture= None;
+
+        let composite_bind_group = None;
         // /
         // /      P I P E L I N E S
         // /
@@ -243,6 +271,19 @@ impl State {
 
         let outline_pipeline = outline_pipeline_struct.pipeline;
 
+        // Blur pipeline 
+
+        let blur_bind_group_layout = create_blur_bind_group_layout(&device);
+
+        let blur_pipeline_struct = Pipeline::blur_pipeline(&device, &config, blur_bind_group_layout)?;
+        let blur_pipeline = blur_pipeline_struct.pipeline;
+
+        // Composite pipeline 
+
+        let composite_bind_group_layout = create_composite_bind_group_layout(&device);
+        let composite_pipeline_struct = Pipeline::composite_pipeline(&device, &config, composite_bind_group_layout)?;
+        let composite_pipeline =composite_pipeline_struct.pipeline;
+
         Ok(Self {
             surface,
             device,
@@ -250,7 +291,7 @@ impl State {
             config,
             is_surface_configured: false,
             render_pipeline,
-            is_space_pressed: false,
+            is_paused: false,
             diffuse_bind_group,
             obj_model,
             instances,
@@ -268,9 +309,19 @@ impl State {
             spin_bind_group,
             spin_buffer,
             sample_count,
-            multisampled_framebuffer,
+            color_texture,
+            resolve_texture,
             outline_pipeline,
-//            depth_texture,
+            blur_params_uniform_buffer,
+            blur_outline_resolved_bind_group,
+            blur_inter_bind_group,
+            blur_intermediate_texture,
+            outline_bloom_texture,
+            linear_sampler,
+            blur_pipeline,
+            scene_color_texture,
+            composite_bind_group,
+            composite_pipeline,
             window,
         })
     }
@@ -294,13 +345,60 @@ impl State {
                 self.sample_count,
             );
 
-            if self.multisampled_framebuffer.is_some() {
-                self.multisampled_framebuffer = Some(create_multisampled_view(
-                    &self.device,
-                    &self.config,
-                    self.sample_count,
-                ));
+            self.color_texture = Some(ColorTexture::create_color_texture(
+                &self.device, 
+                &self.config, 
+                "Color Texture",
+                self.sample_count));
+
+            self.resolve_texture = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Resolve Color  Texture", 1)); 
+            
+            self.blur_intermediate_texture = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Blur Intermediate Color Texture", 1));
+            
+            self.outline_bloom_texture  = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Bloom Color Texture", 1));
+            
+            self.scene_color_texture  = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Scene Color Texture", 1));
+
+            let blur_bind_group_layout = create_blur_bind_group_layout(&self.device);
+
+            let blur_resolve_texture_view = if self.sample_count == 1 
+            {
+                &self.color_texture.as_ref().ok_or("cannot get texture").unwrap().view
+            }
+            else {
+                &self.resolve_texture.as_ref().ok_or("cannot get texture").unwrap().view
             };
+
+            self.blur_outline_resolved_bind_group = Some(create_blur_bind_group(
+                &self.device, 
+                &blur_bind_group_layout, 
+                blur_resolve_texture_view,
+                &self.linear_sampler, 
+                &self.blur_params_uniform_buffer
+            ));
+
+            self.blur_inter_bind_group = Some(create_blur_bind_group(
+                &self.device, 
+                &blur_bind_group_layout, 
+                &self.blur_intermediate_texture.as_ref().ok_or("cannot get texture").unwrap().view,
+                &self.linear_sampler, 
+                &self.blur_params_uniform_buffer
+            ));
+
+
+        // / C O M P O S I T E 
+
+        let composite_bind_group_layout = create_composite_bind_group_layout(&self.device);
+
+        self.composite_bind_group = Some(create_composite_bind_group(
+            &self.device, 
+            &composite_bind_group_layout, 
+            &self.scene_color_texture.as_ref().ok_or("cannot get texture").unwrap().view, 
+            &self.outline_bloom_texture.as_ref().ok_or("cannot get texture").unwrap().view,
+            &self.resolve_texture.as_ref().ok_or("cannot get texture").unwrap().view,
+            &self.linear_sampler));
+
+
         }
     }
 
@@ -313,18 +411,19 @@ impl State {
         // Clamp for browser tab resume
         dt = dt.min(0.1);
 
-        // Update logic
-        self.spin.update(dt);
+        if !self.is_paused {
+            // Update logic
+            self.spin.update(dt);
 
-        // Update GPU data
-        self.spin_uniform.update_from_angle(self.spin.angle());
+            // Update GPU data
+            self.spin_uniform.update_from_angle(self.spin.angle());
 
-        self.queue.write_buffer(
-            &self.spin_buffer,
-            0,
-            bytemuck::bytes_of(&[self.spin_uniform]),
-        );
-
+            self.queue.write_buffer(
+                &self.spin_buffer,
+                0,
+                bytemuck::bytes_of(&[self.spin_uniform]),
+            );
+        }
         // Camera
         self.camera_controller.update_camera(&mut self.camera);
     }
@@ -375,7 +474,10 @@ impl State {
             color_attachments: &[],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.depth_stencil.view,
-                depth_ops: None,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.),
+                    store: wgpu::StoreOp::Store,
+                }),
                 stencil_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(0),
                     store: wgpu::StoreOp::Store,
@@ -400,36 +502,42 @@ impl State {
         // /
 
 
-        let outline_pass_color_attachments = match &self.multisampled_framebuffer {
-            Some(texture_view) => {
+        let outline_pass_color_attachments = if self.sample_count == 1 
+            {
                 wgpu::RenderPassColorAttachment {
-                    view: texture_view,
+                    view: &self.color_texture.as_ref().ok_or(wgpu::SurfaceError::Lost)?.view,
+                    //view: &view,
                     depth_slice: None,
-                    resolve_target: Some(&view),
+                    resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load, 
+                        load: wgpu::LoadOp::Clear(wgpu::Color{ 
+                            r: 0.67, 
+                            g: 0.27, 
+                            b: 0.15, 
+                            a: 1. }), // <- DO NOT CLEAR
                         store: wgpu::StoreOp::Store,
                     },
                 }
-            }
-            None => wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color{ 
-                        r: 0.67, 
-                        g: 0.27, 
-                        b: 0.15, 
-                        a: 1. }), // <- DO NOT CLEAR
-                    store: wgpu::StoreOp::Store,
-                },
-            },
-        };
+            } else {
+                wgpu::RenderPassColorAttachment {
+                    view: &self.color_texture.as_ref().ok_or(wgpu::SurfaceError::Lost)?.view,
+                    //view: &view,
+                    depth_slice: None,
+                    resolve_target: Some(&self.resolve_texture.as_ref().ok_or(wgpu::SurfaceError::Lost)?.view),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color{ 
+                            r: 0.67, 
+                            g: 0.27, 
+                            b: 0.15, 
+                            a: 1. }), // <- DO NOT CLEAR
+                        store: wgpu::StoreOp::Store,
+                    },
+                }
+            };
+        
 
         let outline_depth_stencil_attachment = wgpu::RenderPassDepthStencilAttachment {
                 view: &self.depth_stencil.view,
-              //  view: &self.depth_texture.view,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.), // <- clear depth again
                     store: wgpu::StoreOp::Store,
@@ -461,52 +569,123 @@ impl State {
         drop(outline_pass);
 
         // /
+        //  B L U R   O U T L I N E S
+
+        // Horizontal blur
+        self.queue.write_buffer(
+            &self.blur_params_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&BlurParams {
+                direction: [1.0, 0.0],
+            }),
+        );
+
+        let blur_horizontal_pass_color_attachments = 
+                wgpu::RenderPassColorAttachment {
+                    view: &self.blur_intermediate_texture.as_ref().ok_or(wgpu::SurfaceError::Lost)?.view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                };
+    
+        let mut blur_horizontal_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("horizontal blur"),
+            color_attachments: &[Some(blur_horizontal_pass_color_attachments)],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        blur_horizontal_pass.set_pipeline(&self.blur_pipeline);
+        blur_horizontal_pass.set_bind_group(0, self.blur_outline_resolved_bind_group.as_ref().ok_or(wgpu::SurfaceError::Lost)?, &[]);
+        blur_horizontal_pass.draw(0..3, 0..1);
+
+        drop(blur_horizontal_pass);
+
+        // Vertical blur
+        self.queue.write_buffer(
+            &self.blur_params_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&BlurParams {
+                direction: [0.0, 1.0],
+            }),
+        );
+
+        let blur_vertical_pass_color_attachments = 
+                    wgpu::RenderPassColorAttachment {
+                        view: &self.outline_bloom_texture.as_ref().ok_or(wgpu::SurfaceError::Lost)?.view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                    },
+                };
+        
+        let mut blur_vertical_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("vertical blur"),
+            color_attachments: &[Some(blur_vertical_pass_color_attachments)],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        blur_vertical_pass.set_pipeline(&self.blur_pipeline);
+        blur_vertical_pass.set_bind_group(0, self.blur_inter_bind_group.as_ref().ok_or(wgpu::SurfaceError::Lost)?, &[]);
+        blur_vertical_pass.draw(0..3, 0..1);
+
+        drop(blur_vertical_pass);
+
+
+        // /
         // T O T A L  S C E N E
         // /
 
 
         
         //
-        let render_pass_color_attachments = match &self.multisampled_framebuffer {
-            Some(texture_view) => {
+        let render_pass_color_attachments = if self.sample_count == 1
+             {  
                 wgpu::RenderPassColorAttachment {
-                    view: texture_view,
+                    //view: &view,
+                    view: &self.scene_color_texture.as_ref().ok_or(wgpu::SurfaceError::Lost)?.view,
                     depth_slice: None,
-                    resolve_target: Some(&view),
+                    resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load, 
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
                 }
-            }
-            None => wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    // Clear(wgpu::Color{ 
-                        // r: 0.77, 
-                        // g: 0.57, 
-                        // b: 0.35, 
-                        // a: 1. }), // <- DO NOT CLEAR
-                    store: wgpu::StoreOp::Store,
-                },
-            },
+
+            } else {
+                wgpu::RenderPassColorAttachment {
+                    view: &self.color_texture.as_ref().ok_or(wgpu::SurfaceError::Lost)?.view,
+                    depth_slice: None,
+                    resolve_target: Some(&self.scene_color_texture.as_ref().ok_or(wgpu::SurfaceError::Lost)?.view),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), 
+                        store: wgpu::StoreOp::Discard,
+                    },
+                }
         };
+
+
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Total Scene Pass"),
             color_attachments: &[Some(render_pass_color_attachments)],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.depth_stencil.view,
-              //  view: &self.depth_texture.view,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.), // <- clear depth again
+                    load: wgpu::LoadOp::Load, // <- clear depth again
                     store: wgpu::StoreOp::Store,
                 }),
 
                 stencil_ops: Some(wgpu::Operations {
                 load: wgpu::LoadOp::Load, // <- keep mask
+                //load: wgpu::LoadOp::Clear(0), 
                 store: wgpu::StoreOp::Store,
                 }) ,
             }),
@@ -522,26 +701,54 @@ impl State {
         render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
         render_pass.set_bind_group(2, &self.spin_bind_group, &[]);
         render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-        //render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        //render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
-        //render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
-
+   
         render_pass.draw_mesh_instanced(&self.obj_model.meshes[0], 0..self.instances.len() as u32);
 
         drop(render_pass);
+
+
+
+        // /  C O M P O S I T E   P A S S 
+
+        let mut composite_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("composite pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view, // ⬅ swapchain
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+
+        composite_pass.set_pipeline(&self.composite_pipeline);
+        composite_pass.set_bind_group(0, &self.composite_bind_group, &[]);
+        composite_pass.draw(0..3, 0..1);
+
+        drop(composite_pass);
+
 
 
         // submit will accept anything that implements IntoIter
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
-
         Ok(())
     }
 
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         match (code, is_pressed) {
-            (KeyCode::Space, is_pressed) => self.is_space_pressed = is_pressed,
+            (KeyCode::Space, is_pressed) =>  {
+                            if is_pressed
+                            {self.is_paused = !self.is_paused;
+                            self.last_frame = Instant::now();}
+                        }
             (
                 KeyCode::KeyW
                 | KeyCode::ArrowUp

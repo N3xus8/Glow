@@ -26,7 +26,7 @@ impl StencilTexture {
             sample_count,
             dimension: wgpu::TextureDimension::D2,
             format: depth_stencil_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
 
@@ -36,5 +36,22 @@ impl StencilTexture {
             texture: depth_stencil_texture,
             view: depth_stencil_view,
         }
+    }
+
+    pub fn create_depth_only_view(&self, label: &str) -> wgpu::TextureView {
+
+        self.texture.create_view(
+            &wgpu::TextureViewDescriptor {
+            label: Some(label),
+                format: None, // Inherit from texture
+                dimension: None, // Inherit from texture
+                // These fields are now direct members of TextureViewDescriptor:
+                aspect: wgpu::TextureAspect::DepthOnly, 
+                base_mip_level: 0,
+                mip_level_count: None,
+                base_array_layer: 0,
+                array_layer_count: None,
+                usage: None,
+            })
     }
 }

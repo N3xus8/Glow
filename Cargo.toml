@@ -1,5 +1,5 @@
 [package]
-name = "edges"
+name = "halo"
 version = "0.1.0"
 edition = "2024"
 
@@ -19,6 +19,7 @@ bytemuck={ version = "1.24", features = [ "derive" ] }
 cgmath = "0.18.0"
 tobj = { version = "4.0.3", default-features = false, features = ["async"]}
 instant = { version = "0.1.13", features = ["wasm-bindgen"] }
+caddyfile = "0.1.1"
 [dependencies.image]
 version = "0.25.9"
 default-features = false
@@ -42,7 +43,7 @@ web-sys = { version = "0.3.83", features = [
 reqwest = { version = "0.13.1" }
 
 [[bin]]
-    name="edges_web"
+    name="halo_web"
     path="src/main.rs" 
 
 [build-dependencies]

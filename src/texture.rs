@@ -174,3 +174,57 @@ pub fn create_multisampled_view(
         .create_texture(multisampled_frame_descriptor)
         .create_view(&wgpu::TextureViewDescriptor::default())
 }
+
+
+
+
+// /
+// /  C O L O R   T E X T U R E 
+// /
+// / Intermediate/offscreen texture 
+pub struct ColorTexture {
+    #[allow(unused)]
+    pub texture: wgpu::Texture,
+    pub view: wgpu::TextureView,
+}
+
+impl ColorTexture {
+    pub fn create_color_texture(
+            device: &wgpu::Device,
+            config: &wgpu::SurfaceConfiguration,
+            label: &str,
+            sample_count: u32,
+        ) 
+        -> Self {
+
+        let size = wgpu::Extent3d {
+            width: config.width,
+            height: config.height,
+            depth_or_array_layers: 1,
+        };
+
+
+        let usage = if sample_count == 1 {wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING} else {wgpu::TextureUsages::RENDER_ATTACHMENT};
+        // This is your internal "canvas"
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size,
+            mip_level_count: 1,
+            sample_count, 
+            dimension: wgpu::TextureDimension::D2,
+            // Use the same format as your surface (e.g., Bgra8UnormSrgb)
+            format: config.format,
+            //format: wgpu::TextureFormat::Rgba16Float,
+            // USAGE IS KEY: 
+            // RENDER_ATTACHMENT so we can draw to it in Pass 1.
+            // TEXTURE_BINDING so the Edge Shader can read it in Pass 2.
+            //usage: usage,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        Self { texture, view }
+    }
+}

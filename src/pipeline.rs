@@ -49,7 +49,8 @@ impl Pipeline {
                 targets: &[Some(wgpu::ColorTargetState {
                     // 4.
                     format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    //blend: None,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -131,7 +132,7 @@ impl Pipeline {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth24PlusStencil8,
                 depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::Always,
+                depth_compare: wgpu::CompareFunction::Less,
                 stencil: wgpu::StencilState {
                     front: wgpu::StencilFaceState {
                         compare: wgpu::CompareFunction::Always,
@@ -208,7 +209,8 @@ impl Pipeline {
                     // 4.
                     format: config.format,
                     //blend: Some(wgpu::BlendState::REPLACE),
-                    blend: Some(outline_color_target),
+                    //blend: Some(outline_color_target),
+                    blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -222,13 +224,20 @@ impl Pipeline {
                     depth_write_enabled: false,
                     depth_compare: wgpu::CompareFunction::LessEqual,
                     stencil: wgpu::StencilState {
-                        front: wgpu::StencilFaceState {
+/*                         front: wgpu::StencilFaceState {
+                            compare: wgpu::CompareFunction::NotEqual,
+                            pass_op: wgpu::StencilOperation::Keep,
+                            fail_op: wgpu::StencilOperation::Keep,
+                            depth_fail_op: wgpu::StencilOperation::Keep,
+                        }, */
+                        front : wgpu::StencilFaceState::IGNORE,
+                        back:  wgpu::StencilFaceState {
                             compare: wgpu::CompareFunction::NotEqual,
                             pass_op: wgpu::StencilOperation::Keep,
                             fail_op: wgpu::StencilOperation::Keep,
                             depth_fail_op: wgpu::StencilOperation::Keep,
                         },
-                        back: wgpu::StencilFaceState::IGNORE,
+
                         read_mask: 0xFF,
                         write_mask: 0x00,
                     },
@@ -253,5 +262,112 @@ impl Pipeline {
         })
 
     }
- 
+
+// /  B L U R 
+
+  pub fn blur_pipeline (
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        blur_bind_group_layout:wgpu::BindGroupLayout, 
+        ) -> Result<Pipeline> {
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("blur shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/blur.wgsl").into()),
+        });
+
+        let blur_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("blur pipeline layout"),
+            bind_group_layouts: &[&blur_bind_group_layout],
+            immediate_size: 0,
+        });
+
+        let blur_pipeline =device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("outline blur pipeline"),
+                layout: Some(&blur_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[], // fullscreen triangle
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: config.format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+            });
+
+        Ok(Self { pipeline: blur_pipeline })
+
+    }
+
+  pub fn composite_pipeline (
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        composite_bind_group_layout:wgpu::BindGroupLayout, 
+        ) -> Result<Pipeline> {
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("composite shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/composite.wgsl").into()),
+        });
+
+
+        let composite_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("composite pipeline layout"),
+            bind_group_layouts: &[&composite_bind_group_layout],
+            immediate_size: 0,
+        });
+
+
+        let composite_pipeline =
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("composite pipeline"),
+            layout: Some(&composite_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(), // fullscreen triangle
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format, // swapchain format
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        Ok(Self { pipeline: composite_pipeline })
+    }
+
+
+
 }

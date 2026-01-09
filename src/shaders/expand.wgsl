@@ -63,9 +63,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let noise01 = noise * 0.5 + 0.5;
    
     // Subtle edge modulation
-    let noisy_edge = clamp(noise01, 0.0, 1.0);
-    let alpha = noisy_edge;
-    let edge_color = vec3<f32>(0.0, 0.0, 0.0) * alpha; // black edge
+    //let noisy_edge = clamp(noise01, 0.0, 1.0);
+    let noisy_edge = clamp(noise * 0.2 + 0.8, 0.0, 1.0);
+    //let alpha = noisy_edge;
+    let alpha = 1.0 ;
+    let edge_color = vec3<f32>(0.0, 0.5, 0.5); //* alpha; // black edge
 
     // let threshold = 0.5;
     // let noisy_threshold = threshold + (noise - 0.5) * 0.5;
