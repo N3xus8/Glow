@@ -1,5 +1,7 @@
 # _H A L O_ °
 
+_Jan 2026_
+
 ## **WGPU** Series  🦀
 
 ### Description:
@@ -13,6 +15,12 @@ Glowing/Blooming silhouette.🔥
 * Tone Mapping 🔥
 * Blur Horizontal/Vertical 🔥
 
+### Versions I used:
+
+cargo 1.92.0 
+
+Developped on [**Rocky Linux**](https://rockylinux.org/) 10.1
+
 ### Noticeable crates: 📦
 
 
@@ -23,22 +31,22 @@ Glowing/Blooming silhouette.🔥
 
 ```mermaid
 graph LR
-    A[Stencil Mask Pass] --> B[Stencil Outline Pass]
+    A[Stencil Mask Pass] --> B[HDR Stencil Outline Pass]
 
     %% Branch 1: Main Scene
-    B --> C[Main Scene]
+    B --> C[HDR Main Scene]
 
     %% Branch 2: Bloom Outline
-    B --> D[Blur Horizontal]
-    D --> E[Blur Vertical]
-    E --> F[Bloom Outline]
+    B --> D[HDR Blur Horizontal]
+    D --> E[HDR Blur Vertical]
+    E --> F[HDR Bloom Outline]
 
     %% Recombine
-    C --> G[Composite Pass]
+    C --> G[HDR Composite Pass]
     F --> G
 
     %% Final passes
-    G --> H[Tone Mapping]
+    G --> H[SDR Tone Mapping]
     H --> I[Swapchain]
 ```
 
