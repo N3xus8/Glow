@@ -76,7 +76,7 @@ impl State {
         // / User Arguments
 
         // Sample count can be 1 or 4
-        let sample_count: u32 = 1;
+        let sample_count: u32 = 4;
 
         // HDR
         let is_hdr = true;
@@ -652,7 +652,6 @@ impl State {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        //load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
                         load: wgpu::LoadOp::Clear(wgpu::Color{ 
                             r: 0.67, 
                             g: 0.27, 
@@ -687,7 +686,6 @@ impl State {
 
                 stencil_ops: Some(wgpu::Operations {
                 load: wgpu::LoadOp::Load, // <- keep mask
-                //load: wgpu::LoadOp::Clear(0), 
                 store: wgpu::StoreOp::Store,
                 }) ,
             }),
