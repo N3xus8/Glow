@@ -19,6 +19,29 @@ Glowing/Blooming silhouette.🔥
 * **WGPU** version 28.0.
 * **Winit** version 0.30. 
 
+### Techniques:
+
+```mermaid
+graph LR
+    A[Stencil Mask Pass] --> B[Stencil Outline Pass]
+
+    %% Branch 1: Main Scene
+    B --> C[Main Scene]
+
+    %% Branch 2: Bloom Outline
+    B --> D[Blur Horizontal]
+    D --> E[Blur Vertical]
+    E --> F[Bloom Outline]
+
+    %% Recombine
+    C --> G[Composite Pass]
+    F --> G
+
+    %% Final passes
+    G --> H[Tone Mapping]
+    H --> I[Swapchain]
+```
+
 ## **How to run it:**
 
 ```bash
@@ -42,6 +65,6 @@ If you run MSAA (i.e sample = 4), you need to run the code in a browser that sup
 
 ### **Check this out:** 
 
-[![Watch the video](halo.png)]
+![Watch the video](halo.png)
 
 
