@@ -11,6 +11,7 @@ pub mod texture;
 pub mod utils;
 pub mod vertex;
 pub mod web_utils;
+pub mod visualizer;
 
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(

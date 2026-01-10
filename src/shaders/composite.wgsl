@@ -44,7 +44,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     //return    scene + bloom * 1. ;
     //return    scene  ;
 
-    let bloom_strength = 1.7 ;
+    let bloom_strength = 3.7 ;
 
     let scene_rgb = scene.rgb;
     let bloom_rgb = bloom.rgb + vec3(0.0, 0.0, 0.0);
@@ -52,6 +52,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = scene_rgb + bloom_rgb * bloom_strength;
 
     return vec4(color, 1.0);
-    //return bloom;
-
+    //return vec4(bloom_rgb  * bloom_strength, 1.0);
 }

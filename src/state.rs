@@ -4,8 +4,9 @@ use instant::Instant;
 use wgpu::BindGroup;
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
-use crate::{camera::{Camera, CameraController, CameraUniform, bind_group_for_camera_uniform, create_camera_buffer}, depth_stencil::{self, StencilTexture}, extra::{self, BlurParams, Spin, SpinUniform, create_blur_bind_group, create_blur_bind_group_layout, create_composite_bind_group_layout, create_linear_sampler, create_tone_map_bind_group, create_tone_map_bind_group_layout}, model::{DrawModel, Instance, Model, create_instance_buffer}, pipeline::Pipeline, resources, texture::{ColorTexture, create_multisampled_view}};
+use crate::{camera::{Camera, CameraController, CameraUniform, bind_group_for_camera_uniform, create_camera_buffer}, depth_stencil::{self, StencilTexture}, extra::{self, BlurParams, Spin, SpinUniform, create_blur_bind_group, create_blur_bind_group_layout, create_composite_bind_group_layout, create_linear_sampler, create_tone_map_bind_group, create_tone_map_bind_group_layout}, model::{DrawModel, Instance, Model, create_instance_buffer}, pipeline::Pipeline, resources, texture::ColorTexture};
 use crate::extra::create_composite_bind_group;
+use crate::visualizer::* ;
 
 pub struct State {
     pub surface: wgpu::Surface<'static>,
@@ -59,81 +60,25 @@ pub struct State {
 
 impl State {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
-        let size = window.inner_size();
+ 
+ 
 
-        // The instance is a handle to our GPU
-        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            #[cfg(not(target_arch = "wasm32"))]
-            backends: wgpu::Backends::PRIMARY,
-            #[cfg(target_arch = "wasm32")]
-            backends: wgpu::Backends::GL,
-            ..Default::default()
-        });
+        // " V I S U A L I Z E R "   S E T U P
+        let visualizer = Visualizer::new(window.clone()).await?;
 
-        // Surface
-        let surface = instance.create_surface(window.clone())?;
+        let surface= visualizer.surface;
+        let device = visualizer.device ;
+        let queue = visualizer.queue ;
+        let config = visualizer.config ;
+        // / \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
-        // Adapter
 
-        let adapter = if cfg!(target_arch = "wasm32") {
-            instance //  TODO select the most relevant adapter
-                .request_adapter(&wgpu::RequestAdapterOptions {
-                    power_preference: wgpu::PowerPreference::default(),
-                    compatible_surface: Some(&surface),
-                    force_fallback_adapter: false,
-                })
-                .await?
-        } else {
-            instance // TODO select the most relevant adapter
-                .enumerate_adapters(wgpu::Backends::all())
-                .await
-                .into_iter()
-                .find(|adapter| adapter.is_surface_supported(&surface))
-                .ok_or(anyhow::anyhow!("No adapter found"))?
-        };
+        // / User Arguments
 
-        // Device & Queue
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: None,
-                required_features: wgpu::Features::empty(),
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                // WebGL doesn't support all of wgpu's features, so if
-                // we're building for the web we'll have to disable some.
-                required_limits: if cfg!(target_arch = "wasm32") {
-                    wgpu::Limits::downlevel_webgl2_defaults()
-                } else {
-                    wgpu::Limits::default()
-                },
-                memory_hints: Default::default(),
-                trace: wgpu::Trace::Off,
-            })
-            .await?;
-
-        let surface_caps = surface.get_capabilities(&adapter);
-        // Shader code in this tutorial assumes an sRGB surface texture. Using a different
-        // one will result in all the colors coming out darker. If you want to support non
-        // sRGB surfaces, you'll need to account for that when drawing to the frame.
-        let surface_format = surface_caps
-            .formats
-            .iter()
-            .find(|f| f.is_srgb())
-            .copied()
-            .unwrap_or(surface_caps.formats[0]);
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface_format,
-            width: size.width,
-            height: size.height,
-            present_mode: surface_caps.present_modes[0],
-            alpha_mode: surface_caps.alpha_modes[0],
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-        };
-
-        // /
+        // Sample count can be 1 or 4
         let sample_count: u32 = 1;
+
+        // HDR
         let is_hdr = true;
 
         // /  
@@ -142,6 +87,7 @@ impl State {
 
         //  Texture for Cube
         let url = "images/wgpu-logo.png";
+        //let url = "cube-diffuse.jpg";
         let diffuse_texture =
             crate::texture::Texture::get_texture_from_image(&device, &queue, url).await?;
 
@@ -210,6 +156,7 @@ impl State {
 
         // / C O L O R  T E X T U R E 
 
+        // Can be  multi-sampled
         //let color_texture = ColorTexture::create_color_texture(&device, &config, "Color Texture", sample_count);
         let color_texture = None;
 
@@ -234,16 +181,20 @@ impl State {
 
         let blur_params_uniform_buffer = blur_params.create_blurparams_uniform_buffer(&device);
 
+        // Texture sampler
         let linear_sampler = create_linear_sampler(&device);
 
         let blur_outline_resolved_bind_group = None;
 
         let blur_inter_bind_group = None;
 
+        // Texture used between blur horizotal and vertical
         let blur_intermediate_texture = None;
 
+        // final texture out of blur H/V
         let outline_bloom_texture = None;
 
+        // Texture for the main scene
         let scene_color_texture= None;
 
         // / C O M P O S I T E 
@@ -352,17 +303,27 @@ impl State {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
-                if width > 0 && height > 0 {
+
+        if width > 0 && height > 0 {  // Valid if windows in none zero
+            // Dimensions
             self.config.width = width;
             self.config.height = height;
+
+            // Configure surface
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
+
+            // Camera
             self.camera.aspect = width as f32 / height as f32;
 
             // This is a fix from chatgpt otherwise it only works for desktop not for browser.
             self.camera_uniform.update_view_proj(&self.camera);
             //self.depth_texture = crate::texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
             
+            // /
+            // /  T E X T U R E S
+
+            // Depth Stencil
             self.depth_stencil = depth_stencil::StencilTexture::create_stencil_texture(
                 &self.device,
                 &self.config,
@@ -370,6 +331,7 @@ impl State {
                 self.sample_count,
             );
 
+            // Color texture - Can be multi Sampled -
             self.color_texture = Some(ColorTexture::create_color_texture(
                 &self.device, 
                 &self.config, 
@@ -378,6 +340,7 @@ impl State {
                 self.is_hdr,
             ));
 
+            // Resolve texture - single sampled.
             self.resolve_texture = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Resolve Color  Texture", 1, self.is_hdr,)); 
             
             self.blur_intermediate_texture = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Blur Intermediate Color Texture", 1, self.is_hdr,));
@@ -438,11 +401,6 @@ impl State {
             &self.composite_texture.as_ref().ok_or("cannot get texture").unwrap().view,
             &self.linear_sampler,
         ));
-
-
-
-
-
 
         }
     }
@@ -555,12 +513,7 @@ impl State {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                          //  load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        load: wgpu::LoadOp::Clear(wgpu::Color{ 
-                            r: 0.35, 
-                            g: 0.17, 
-                            b: 0.05, 
-                            a: 1. }), // <- DO NOT CLEAR
+                           load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
                     },
                 }
@@ -571,11 +524,7 @@ impl State {
                     depth_slice: None,
                     resolve_target: Some(&self.resolve_texture.as_ref().ok_or(wgpu::SurfaceError::Lost)?.view),
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color{ 
-                            r: 0.67, 
-                            g: 0.27, 
-                            b: 0.15, 
-                            a: 1. }), // <- DO NOT CLEAR
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
                     },
                 }
@@ -703,7 +652,12 @@ impl State {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        //load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
+                        load: wgpu::LoadOp::Clear(wgpu::Color{ 
+                            r: 0.67, 
+                            g: 0.27, 
+                            b: 0.15, 
+                            a: 1. }),                         
                         store: wgpu::StoreOp::Store,
                     },
                 }

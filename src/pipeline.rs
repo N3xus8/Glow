@@ -227,7 +227,7 @@ impl Pipeline {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
             primitive: wgpu::PrimitiveState {
-                cull_mode: Some(wgpu::Face::Front), // important
+                cull_mode: Some(wgpu::Face::Back), // important
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
@@ -235,20 +235,13 @@ impl Pipeline {
                     depth_write_enabled: false,
                     depth_compare: wgpu::CompareFunction::LessEqual,
                     stencil: wgpu::StencilState {
-/*                         front: wgpu::StencilFaceState {
-                            compare: wgpu::CompareFunction::NotEqual,
-                            pass_op: wgpu::StencilOperation::Keep,
-                            fail_op: wgpu::StencilOperation::Keep,
-                            depth_fail_op: wgpu::StencilOperation::Keep,
-                        }, */
-                        front : wgpu::StencilFaceState::IGNORE,
-                        back:  wgpu::StencilFaceState {
+                        front: wgpu::StencilFaceState {
                             compare: wgpu::CompareFunction::NotEqual,
                             pass_op: wgpu::StencilOperation::Keep,
                             fail_op: wgpu::StencilOperation::Keep,
                             depth_fail_op: wgpu::StencilOperation::Keep,
                         },
-
+                        back : wgpu::StencilFaceState::IGNORE,
                         read_mask: 0xFF,
                         write_mask: 0x00,
                     },
