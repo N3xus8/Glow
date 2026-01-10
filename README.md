@@ -1,4 +1,4 @@
-# _H A L O_ °
+# _G L O W_  ,~*
 
 _Jan 2026_
 
@@ -6,7 +6,7 @@ _Jan 2026_
 
 ### Description:
 
-Glowing/Blooming silhouette.🔥
+Glowing/Blooming silhouette & edges.🔥
 
 
 ### Features:
@@ -73,6 +73,6 @@ If you run MSAA (i.e sample = 4), you need to run the code in a browser that sup
 
 ### **Check this out:** 
 
-![Watch the video](halo.png)
+![Watch the pic]
 
 

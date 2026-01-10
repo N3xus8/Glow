@@ -4,7 +4,7 @@ use instant::Instant;
 use wgpu::BindGroup;
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
-use crate::{camera::{Camera, CameraController, CameraUniform, bind_group_for_camera_uniform, create_camera_buffer}, depth_stencil::{self, StencilTexture}, extra::{self, BlurParams, Spin, SpinUniform, create_blur_bind_group, create_blur_bind_group_layout, create_composite_bind_group_layout, create_linear_sampler, create_tone_map_bind_group, create_tone_map_bind_group_layout}, model::{DrawModel, Instance, Model, create_instance_buffer}, pipeline::Pipeline, resources, texture::ColorTexture};
+use crate::{camera::{Camera, CameraController, CameraUniform, bind_group_for_camera_uniform, create_camera_buffer}, depth_stencil::{self, StencilTexture}, extra::{self, BlurParams, Spin, SpinUniform, create_blur_bind_group, create_blur_bind_group_layout, create_composite_bind_group_layout, create_edge_bind_group, create_edge_bind_group_layout, create_linear_sampler, create_tone_map_bind_group, create_tone_map_bind_group_layout}, model::{DrawModel, Instance, Model, create_instance_buffer}, pipeline::Pipeline, resources, texture::ColorTexture};
 use crate::extra::create_composite_bind_group;
 use crate::visualizer::* ;
 
@@ -41,9 +41,16 @@ pub struct State {
     blur_inter_bind_group: Option<BindGroup>,
     blur_intermediate_texture: Option<ColorTexture>,
     outline_bloom_texture: Option<ColorTexture>,
+    normal_texture: crate::texture::Texture,
+    normal_resolve_texture: crate::texture::Texture,
+    parallel_depth_texture: crate::texture::Texture,
+    parallel_pass_pipeline: wgpu::RenderPipeline,
     linear_sampler: wgpu::Sampler,
     blur_pipeline: wgpu::RenderPipeline,
     scene_color_texture: Option<ColorTexture>,
+    edge_bind_group: Option<wgpu::BindGroup>,
+    edge_pipeline: wgpu::RenderPipeline,
+    edge_texture: Option<ColorTexture>,
     composite_bind_group: Option<BindGroup>,
     composite_pipeline: wgpu::RenderPipeline,
     composite_texture: Option<ColorTexture>,
@@ -154,16 +161,34 @@ impl State {
             sample_count,
         );
 
+        // / N O R M A L  T E X T U R E 
+
+        let normal_texture = crate::texture::Texture::create_normal_texture(
+            &device,
+            &config, 
+            "normal texture",
+            sample_count,
+        );
+
+        let normal_resolve_texture = crate::texture::Texture::create_normal_texture(
+            &device,
+            &config, 
+            "normal resolve texture",
+            1,
+        );
         // / C O L O R  T E X T U R E 
 
         // Can be  multi-sampled
-        //let color_texture = ColorTexture::create_color_texture(&device, &config, "Color Texture", sample_count);
         let color_texture = None;
 
         // /  R E S O L V E   T E X T U R E 
         // /
         let resolve_texture = None;
+        
+        // / D E P T H  P R E P A S S
 
+        let parallel_depth_texture = crate::texture::Texture::create_depth_texture(&device, &config, "pre pass depth_texture");
+    
         // / S P I N
 
         let last_frame = Instant::now();
@@ -173,9 +198,18 @@ impl State {
         let (spin_bind_group_layout, spin_bind_group) =
             SpinUniform::bind_group_for_spin_uniform(&spin_buffer, &device);
 
+        // /   E D G E  D E T E C T I O N
+
+        let edge_bind_group_layout = create_edge_bind_group_layout(&device);
+
+        let edge_bind_group = None;
+
+        let edge_texture = None;
+
+
         // /  B L U R  F O R  G L O W 
 
-        // // (1,0) = horizontal, (0,1) = vertical
+        // // (1,0) = horizontal, (0,1) = vertical . Pipeline reuse for Horiz/Vert
 
         let blur_params = BlurParams::new(1., 0.);
 
@@ -256,6 +290,18 @@ impl State {
         let tone_map_pipeline_struct  = Pipeline::tone_map_pipeline(&device, &config, tone_map_bind_group_layout)?;
         let tone_map_pipeline = tone_map_pipeline_struct.pipeline;
 
+
+        // Parallel pipeline 
+
+        let parallel_pass_pipeline_struct = Pipeline::parallel_depth_pipeline(&device,  &camera_bind_group_layout, &spin_bind_group_layout)?;
+
+        let parallel_pass_pipeline = parallel_pass_pipeline_struct.pipeline;
+
+        // Edge pipeline 
+        let edge_pipeline_struct =Pipeline::edge_pipeline(&device, &config, &edge_bind_group_layout, is_hdr)?;
+
+        let edge_pipeline = edge_pipeline_struct.pipeline;
+
         Ok(Self {
             surface,
             device,
@@ -289,9 +335,16 @@ impl State {
             blur_inter_bind_group,
             blur_intermediate_texture,
             outline_bloom_texture,
+            normal_texture,
+            normal_resolve_texture,
+            parallel_depth_texture,
+            parallel_pass_pipeline,
             linear_sampler,
             blur_pipeline,
             scene_color_texture,
+            edge_bind_group,
+            edge_pipeline,
+            edge_texture,
             composite_bind_group,
             composite_pipeline,
             composite_texture,
@@ -331,6 +384,22 @@ impl State {
                 self.sample_count,
             );
 
+            self.normal_texture = crate::texture::Texture::create_normal_texture(
+                &self.device, 
+                &self.config, 
+                "normal_texture", 
+                self.sample_count);
+
+            self.normal_resolve_texture = crate::texture::Texture::create_normal_texture(
+                &self.device,
+                &self.config, 
+                "normal resolve texture",
+                1,
+             );
+
+            // Depth only
+            self.parallel_depth_texture = crate::texture::Texture::create_depth_texture(&self.device, &self.config, "pre pass depth_texture");
+
             // Color texture - Can be multi Sampled -
             self.color_texture = Some(ColorTexture::create_color_texture(
                 &self.device, 
@@ -339,6 +408,8 @@ impl State {
                 self.sample_count,
                 self.is_hdr,
             ));
+
+
 
             // Resolve texture - single sampled.
             self.resolve_texture = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Resolve Color  Texture", 1, self.is_hdr,)); 
@@ -376,6 +447,24 @@ impl State {
             ));
 
 
+
+            // edge detection 
+
+            // Edge texture 
+            self.edge_texture = Some(ColorTexture::create_color_texture(&self.device, &self.config, "Edge Color Texture", 1, self.is_hdr,));
+
+            let edge_bind_group_layout = create_edge_bind_group_layout(&self.device);
+
+            self.edge_bind_group = Some(create_edge_bind_group(
+                &self.device, 
+                &edge_bind_group_layout, 
+                &self.scene_color_texture.as_ref().ok_or("cannot get texture").unwrap().view, 
+                &self.normal_resolve_texture.sampler, 
+                &self.parallel_depth_texture.view, 
+                &self.normal_resolve_texture.view
+            ));
+
+
         // / C O M P O S I T E 
 
         let composite_bind_group_layout = create_composite_bind_group_layout(&self.device);
@@ -383,7 +472,8 @@ impl State {
         self.composite_bind_group = Some(create_composite_bind_group(
             &self.device, 
             &composite_bind_group_layout, 
-            &self.scene_color_texture.as_ref().ok_or("cannot get texture").unwrap().view, 
+            //&self.scene_color_texture.as_ref().ok_or("cannot get texture").unwrap().view,
+            &self.edge_texture.as_ref().ok_or("cannot get texture").unwrap().view,
             &self.outline_bloom_texture.as_ref().ok_or("cannot get texture").unwrap().view,
             &self.resolve_texture.as_ref().ok_or("cannot get texture").unwrap().view,
             &self.linear_sampler));
@@ -465,7 +555,38 @@ impl State {
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
-        
+
+
+    
+        // P A R A L L E L  P A S S - D E P T H   O N L Y 
+
+        let mut parallel_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Depth Prepass"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(
+                wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.parallel_depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }
+            ),
+            occlusion_query_set: None,
+            timestamp_writes: None,
+            multiview_mask: None,
+        });
+
+        parallel_pass.set_pipeline(&self.parallel_pass_pipeline);
+        parallel_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+        parallel_pass.set_bind_group(1, &self.spin_bind_group, &[]);
+        parallel_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+
+        parallel_pass.draw_mesh_instanced(&self.obj_model.meshes[0], 0..self.instances.len() as u32);       
+
+
+        drop(parallel_pass);   
         // /
         //
         // S T E N C I L   P A S S
@@ -643,7 +764,7 @@ impl State {
 
 
         
-        //
+        // Color attachments
         let render_pass_color_attachments = if self.sample_count == 1
              {  
                 wgpu::RenderPassColorAttachment {
@@ -673,10 +794,34 @@ impl State {
                 }
         };
 
+        // Normal attachments
 
+        let normal_color_attachments = if self.sample_count == 1 // 
+           { 
+                wgpu::RenderPassColorAttachment {
+                    view: &self.normal_resolve_texture.view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::RED),
+                        store: wgpu::StoreOp::Store, // We need this for the next pass!
+                    },
+                }
+            } else {
+                wgpu::RenderPassColorAttachment {
+                    view: &self.normal_texture.view,
+                    depth_slice: None,
+                    resolve_target: Some(&self.normal_resolve_texture.view),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::RED),
+                        store: wgpu::StoreOp::Store, 
+                    },
+                }
+            };
+        
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Total Scene Pass"),
-            color_attachments: &[Some(render_pass_color_attachments)],
+            color_attachments: &[Some(render_pass_color_attachments), Some(normal_color_attachments)],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.depth_stencil.view,
                 depth_ops: Some(wgpu::Operations {
@@ -706,6 +851,24 @@ impl State {
 
         drop(render_pass);
 
+        // / E D G E  P A S S
+
+        let mut edge_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &self.edge_texture.as_ref().ok_or(wgpu::SurfaceError::Lost)?.view, 
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment:  None,
+            ..Default::default()
+        });
+        edge_pass.set_pipeline(&self.edge_pipeline);
+        //edge_pass.set_bind_group(0, ping_pong_texture_bind_group, &[]);
+        edge_pass.set_bind_group(0, &self.edge_bind_group, &[]); // Uses your textures
+        edge_pass.draw(0..3, 0..1);
+    
+        drop(edge_pass);
 
 
         // /  C O M P O S I T E   P A S S 

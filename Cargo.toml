@@ -1,5 +1,5 @@
 [package]
-name = "halo"
+name = "glow"
 version = "0.1.0"
 edition = "2024"
 
@@ -43,7 +43,7 @@ web-sys = { version = "0.3.83", features = [
 reqwest = { version = "0.13.1" }
 
 [[bin]]
-    name="halo_web"
+    name="glow_web"
     path="src/main.rs" 
 
 [build-dependencies]

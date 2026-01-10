@@ -21,7 +21,7 @@
 	# Actual image requests
 	@images path /images/*
 	handle @images {
-		root * /home/ubik/Programming/Rust/wgpu/halo/res
+		root * /home/ubik/Programming/Rust/wgpu/glow/res
 		header Access-Control-Allow-Origin "http://localhost:8080"
 		header Access-Control-Allow-Credentials "true"
 		#		header Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
@@ -48,7 +48,7 @@
 	}
 
 	handle_path /models/* {
-		root * /home/ubik/Programming/Rust/wgpu/halo/res/models
+		root * /home/ubik/Programming/Rust/wgpu/glow/res/models
 		header Access-Control-Allow-Origin "http://localhost:8080"
 		header Access-Control-Allow-Credentials "true"
 		header Content-Type text/plain

@@ -32,7 +32,6 @@ impl Pipeline {
                     spin_uniform_bind_group_layout,
                 ],
                 immediate_size: 0,
-              //push_constant_ranges: &[], // older version
             });
 
         //Pipeline
@@ -58,7 +57,13 @@ impl Pipeline {
                     //blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
-                })],
+                }),
+                    Some(wgpu::ColorTargetState { // Location 1
+                        format: texture_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }), 
+                ],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
             primitive: wgpu::PrimitiveState {
@@ -324,6 +329,68 @@ impl Pipeline {
 
     }
 
+pub fn edge_pipeline(
+    device: &wgpu::Device,
+    config: &wgpu::SurfaceConfiguration,
+    edge_bind_group_layout: &wgpu::BindGroupLayout,
+    is_hdr: bool,
+    ) -> Result<Pipeline> {
+
+    let texture_format = if is_hdr {wgpu::TextureFormat::Rgba16Float} else {config.format };
+
+    let edge_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("normal depth edge shader"),
+           source: wgpu::ShaderSource::Wgsl(include_str!("shaders/normal_depth_edges.wgsl").into()),
+        });
+
+    let edge_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Edge Pipeline Layout"),
+        bind_group_layouts: &[&edge_bind_group_layout ],
+        immediate_size: 0, 
+    });
+
+    let edge_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Edge Detection Pipeline"),
+        layout: Some(&edge_pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &edge_shader,
+            entry_point: Some("vs_main"),
+            buffers: &[],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &edge_shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: texture_format, 
+                //format: wgpu::TextureFormat::Rgba16Float,
+                // Use Alpha Blending if you want to overlay edges on the scene
+                blend: None,
+                //blend: Some(wgpu::BlendState::ALPHA_BLENDING), 
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: None, // No depth testing needed for a full-screen quad
+        multisample: wgpu::MultisampleState::default(), // 1-sample because this is post-render
+        multiview_mask: None,
+        cache: None,
+        });
+
+        Ok(Self {
+            pipeline: edge_pipeline,
+        })
+
+
+    }
+
   pub fn composite_pipeline (
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
@@ -427,5 +494,60 @@ impl Pipeline {
         });
         
         Ok(Self{ pipeline: tone_map_pipeline})
+    }
+
+    pub fn parallel_depth_pipeline(
+        device: &wgpu::Device,
+        camera_uniform_bind_group_layout: &wgpu::BindGroupLayout,
+        spin_uniform_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Result<Pipeline> {
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("parallel depth only"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/parallel_depth_only.wgsl").into()),
+        });
+
+        let render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("parallel depth only Pipeline Layout"),
+                bind_group_layouts: &[
+                    camera_uniform_bind_group_layout,
+                    spin_uniform_bind_group_layout,
+                ],
+                immediate_size: 0,
+              //push_constant_ranges: &[], // older version
+            });
+
+        //Pipeline
+
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Render Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"), // 1.
+                buffers: &[ModelVertex::desc(), InstanceRaw::desc()], // 2.
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: None,
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,              
+                mask: !0,                         
+                alpha_to_coverage_enabled: false, 
+            },
+            multiview_mask: None, 
+            cache: None,
+        });
+        Ok(Self {
+            pipeline: render_pipeline,
+        })       
     }
 }

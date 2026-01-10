@@ -437,3 +437,97 @@ impl BlurParams {
         })
 
     }
+
+// /
+// / E D G E   B I N D G R O U P 
+
+
+pub fn create_edge_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Edge Detection Bind Group Layout"),
+                entries: &[
+                    // Binding 0: The intermediate color texture scne (Color)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    // Binding 1: Shared Sampler (Linear/nonFiltering)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                        count: None,
+                    },
+                    // Binding 2: Depth Texture (Special type for Depth)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            // Depth textures have a unique sample type
+                            sample_type: wgpu::TextureSampleType::Depth,
+                        },
+                        count: None,
+                    },
+                    // Binding 3: Normal Texture (Vectors)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                ],
+            })
+}
+
+// Bind group 
+pub fn create_edge_bind_group(
+    device: &wgpu::Device,
+    edge_bind_group_layout: &wgpu::BindGroupLayout,
+    color_texture_view: &wgpu::TextureView,
+    edge_sampler: &wgpu::Sampler,
+    depth_view: &wgpu::TextureView,
+    normal_view: &wgpu::TextureView,
+) -> wgpu::BindGroup {
+
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        layout: &edge_bind_group_layout, 
+        entries: &[
+
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(color_texture_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(edge_sampler),
+            },
+            // Binding 2: The Depth Texture
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&depth_view),
+            },
+            // Binding 3: The Normal Texture
+            // If using MSAA, this must be the RESOLVED normal texture view
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(&normal_view),
+            },
+        ],
+        label: Some("Edge Detection Bind Group"),
+    })
+}
+
+

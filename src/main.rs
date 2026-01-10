@@ -5,7 +5,7 @@ use winit::event_loop::EventLoop;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use halo::app::App;
+use glow::app::App;
 
 fn main() {
     run().expect("failed to run wgpu")

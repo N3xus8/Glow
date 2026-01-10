@@ -116,7 +116,7 @@ impl Texture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: Self::DEPTH_STENCIL_FORMAT,
+            format: Self::DEPTH_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         };
@@ -144,7 +144,124 @@ impl Texture {
             sampler,
         }
     }
+
+
+    // /  N O R M A L  T E X T U R E 
+    // /
+    pub fn create_normal_texture(      
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        label: &str,
+        sample_count: u32,
+    ) -> Self {
+
+        
+        let usage = if sample_count == 1 {           
+            wgpu::TextureUsages::RENDER_ATTACHMENT |  wgpu::TextureUsages::TEXTURE_BINDING 
+        } else {
+            wgpu::TextureUsages::RENDER_ATTACHMENT 
+        };
+
+        let size = wgpu::Extent3d {
+            width: config.width.max(1),
+            height: config.height.max(1),
+            depth_or_array_layers: 1,
+        };
+
+        // 1. Normal Texture: Stores XYZ vectors. 
+        // We use >>>Rgba16Float<<< for high precision (avoids jagged edges on curves).
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size,
+            mip_level_count: 1,
+            sample_count,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float, 
+            usage: usage,
+            view_formats: &[],
+        });
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Edge Detection Sampler"),
+            // Clamp to edge prevents the "border" of the screen from 
+            // bleeding into the edges when sampling neighbors
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            // Use Linear if you want softer, smoother edges.
+            // Use Nearest if you want pixel-perfect, sharp "hard" edges.
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            compare: None,
+            ..Default::default()
+        });
+
+        Self {
+            texture,
+            view,
+            sampler,
+        }
+
+    }
+
+    pub fn normal_group_for_texture(
+        &self,
+        device: &wgpu::Device,
+    ) -> (wgpu::BindGroupLayout, wgpu::BindGroup) {
+
+       let normal_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        // This should match the filterable field of the
+                        // corresponding Texture entry above.
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+                label: Some("normal_bind_group_layout"),
+            }); 
+
+        let normal_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &normal_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&self.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+            label: Some("normal_bind_group"),
+        });
+
+        (normal_bind_group_layout, normal_bind_group)              
+    
+    }
+
 }
+    
+
+
+
 
 pub fn create_multisampled_view(
     device: &wgpu::Device,
