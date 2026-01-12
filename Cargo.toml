@@ -20,6 +20,7 @@ cgmath = "0.18.0"
 tobj = { version = "4.0.3", default-features = false, features = ["async"]}
 instant = { version = "0.1.13", features = ["wasm-bindgen"] }
 caddyfile = "0.1.1"
+gltf = "1.4.1"
 [dependencies.image]
 version = "0.25.9"
 default-features = false

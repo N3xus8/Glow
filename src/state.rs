@@ -4,7 +4,7 @@ use instant::Instant;
 use wgpu::BindGroup;
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
-use crate::{camera::{Camera, CameraController, CameraUniform, bind_group_for_camera_uniform, create_camera_buffer}, depth_stencil::{self, StencilTexture}, extra::{self, BlurParams, Spin, SpinUniform, create_blur_bind_group, create_blur_bind_group_layout, create_composite_bind_group_layout, create_edge_bind_group, create_edge_bind_group_layout, create_linear_sampler, create_tone_map_bind_group, create_tone_map_bind_group_layout}, model::{DrawModel, Instance, Model, create_instance_buffer}, pipeline::Pipeline, resources, texture::ColorTexture};
+use crate::{camera::{Camera, CameraController, CameraUniform, bind_group_for_camera_uniform, create_camera_buffer}, depth_stencil::{self, StencilTexture}, extra::{self, BlurParams, Spin, SpinUniform, create_blur_bind_group, create_blur_bind_group_layout, create_composite_bind_group_layout, create_edge_bind_group, create_edge_bind_group_layout, create_linear_sampler, create_tone_map_bind_group, create_tone_map_bind_group_layout}, model::{DrawModel, Instance, Model, create_instance_buffer}, pipeline::Pipeline, resources::{self, ModelFile}, texture::ColorTexture};
 use crate::extra::create_composite_bind_group;
 use crate::visualizer::* ;
 
@@ -17,7 +17,7 @@ pub struct State {
     pub render_pipeline: wgpu::RenderPipeline,
         is_paused: bool,
     pub diffuse_bind_group: wgpu::BindGroup,
-    obj_model: Model,
+    lib_model: Model,
     camera: Camera,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
@@ -102,13 +102,17 @@ impl State {
             diffuse_texture.bind_group_for_texture(&device);  
 
         // Load Mesh for Cube
-        let obj_model = resources::load_model(
-            "models/cube.obj",
+
+        //let file = ModelFile::Obj("models/cube.obj");
+        let file = ModelFile::Gltf("models/craft_speederD.gltf");
+        //let file = ModelFile::Gltf("models/Cube.gltf");
+
+        let lib_model = resources::load_model(
+            &file,
             &device,
             &queue,
             &diffuse_bind_group_layout,
-        )
-        .await
+        ).await
         .unwrap();
 
         // /
@@ -311,7 +315,7 @@ impl State {
             render_pipeline,
             is_paused: false,
             diffuse_bind_group,
-            obj_model,
+            lib_model,
             instances,
             instance_buffer,
             camera,
@@ -583,7 +587,7 @@ impl State {
         parallel_pass.set_bind_group(1, &self.spin_bind_group, &[]);
         parallel_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-        parallel_pass.draw_mesh_instanced(&self.obj_model.meshes[0], 0..self.instances.len() as u32);       
+        parallel_pass.draw_mesh_instanced(&self.lib_model.meshes[0], 0..self.instances.len() as u32);       
 
 
         drop(parallel_pass);   
@@ -617,7 +621,14 @@ impl State {
         stencil_pass.set_bind_group(1, &self.spin_bind_group, &[]);
         stencil_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-        stencil_pass.draw_mesh_instanced(&self.obj_model.meshes[0], 0..self.instances.len() as u32);
+        //stencil_pass.draw_mesh_instanced(&self.lib_model.meshes[0], 0..self.instances.len() as u32);
+                
+                
+        for mesh in &self.lib_model.meshes {
+
+            stencil_pass.draw_mesh_instanced(&mesh, 0..self.instances.len() as u32);
+ 
+        }
 
         drop(stencil_pass);
 
@@ -680,8 +691,13 @@ impl State {
         outline_pass.set_bind_group(1, &self.spin_bind_group, &[]);
         outline_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-        outline_pass.draw_mesh_instanced(&self.obj_model.meshes[0], 0..self.instances.len() as u32);
+        // outline_pass.draw_mesh_instanced(&self.lib_model.meshes[0], 0..self.instances.len() as u32);
+        for mesh in &self.lib_model.meshes {
 
+            outline_pass.draw_mesh_instanced(&mesh, 0..self.instances.len() as u32);
+ 
+        }
+        
         drop(outline_pass);
 
         // /
@@ -842,12 +858,20 @@ impl State {
 
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_stencil_reference(1);
-        render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+       // render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
         render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
         render_pass.set_bind_group(2, &self.spin_bind_group, &[]);
         render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
    
-        render_pass.draw_mesh_instanced(&self.obj_model.meshes[0], 0..self.instances.len() as u32);
+        //render_pass.draw_mesh_instanced(&self.lib_model.meshes[0], 0..self.instances.len() as u32);
+
+        for mesh in &self.lib_model.meshes {
+            render_pass.set_bind_group(0, &self.lib_model.materials[mesh.material].bind_group, &[]);
+            //render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+
+            render_pass.draw_mesh_instanced(&mesh, 0..self.instances.len() as u32);
+ 
+        }
 
         drop(render_pass);
 

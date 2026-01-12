@@ -35,19 +35,20 @@ graph LR
 
     %% Branch 1: Main Scene
     B --> C[HDR Main Scene]
+    C --> D[HDR Edge Detection]
 
     %% Branch 2: Bloom Outline
-    B --> D[HDR Blur Horizontal]
-    D --> E[HDR Blur Vertical]
-    E --> F[HDR Bloom Outline]
+    B --> E[HDR Blur Horizontal]
+    E --> F[HDR Blur Vertical]
+    F --> G[HDR Bloom Outline]
 
     %% Recombine
-    C --> G[HDR Composite Pass]
-    F --> G
+    D --> I[HDR Composite Pass]
+    G --> I
 
     %% Final passes
-    G --> H[SDR Tone Mapping]
-    H --> I[Swapchain]
+    I --> J[SDR Tone Mapping]
+    J --> K[Swapchain]
 ```
 
 ## **How to run it:**

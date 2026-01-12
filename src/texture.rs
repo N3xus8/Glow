@@ -1,5 +1,7 @@
 use anyhow::*;
+use image::GenericImageView;
 
+use crate::utils::create_texture_from_rgba;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::utils::{load_image, create_texture_from_image};
 #[cfg(target_arch = "wasm32")]
@@ -255,6 +257,166 @@ impl Texture {
 
         (normal_bind_group_layout, normal_bind_group)              
     
+    }
+
+    pub fn create_white_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Texture {
+        let rgba: [u8; 4] = [255, 255, 255, 255]; // white
+
+        create_texture_from_rgba(
+            device,
+            queue,
+            &rgba,
+            1,
+            1,
+            "white_texture",
+        )
+    }
+    pub fn create_solid_color_texture(
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            rgba: [u8;4]
+    ) -> Texture {
+
+        create_texture_from_rgba(
+            device,
+            queue,
+            &rgba,
+            1,
+            1,
+            "solid_color_texture",
+        )
+    }
+    pub fn create_black_pink_checker_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Texture {
+        const SIZE: u32 = 8;
+
+        let mut data = Vec::with_capacity((SIZE * SIZE * 4) as usize);
+
+        for y in 0..SIZE {
+            for x in 0..SIZE {
+                let is_pink = (x + y) % 2 == 0;
+
+                if is_pink {
+                    // Hot pink
+                    data.extend_from_slice(&[255, 0, 255, 255]);
+                } else {
+                    // Black
+                    data.extend_from_slice(&[0, 0, 0, 255]);
+                }
+            }
+        }
+
+        create_texture_from_rgba(
+            device,
+            queue,
+            &data,
+            SIZE,
+            SIZE,
+            "checker_texture",
+        )
+    }
+
+    fn load_texture_from_buffer_native(
+        data: &[u8],
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Texture> {
+        // Decode image (PNG / JPEG / etc.)
+        let img = image::load_from_memory(data)?;
+
+        let rgba = img.to_rgba8();
+        let (width, height) = img.dimensions();
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("gltf_embedded_texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
+
+        Ok(Texture {
+            texture,
+            view,
+            sampler,
+        })
+    }
+
+
+    
+    #[cfg(target_arch = "wasm32")]
+    async fn load_texture_from_gltf_buffer_web(
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            data: &[u8],
+        ) -> Result<wgpu::Texture, JsValue> {
+            let url = object_url_from_bytes(data)?;
+            let texture = load_texture_from_image_web(device, queue, &url).await?;
+            web_sys::Url::revoke_object_url(&url)?;
+            Ok(texture)
+        }
+
+
+    pub async fn load_texture_from_buffer(    
+        data: &[u8],
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Texture> {
+
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let texture = Self::load_texture_from_buffer_native(data, device, queue);
+
+        #[cfg(target_arch = "wasm32")]
+        let texture = Self::load_texture_from_gltf_buffer_web(device, queue, data);
+
+        texture
+
     }
 
 }

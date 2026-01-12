@@ -59,6 +59,8 @@ pub fn create_texture_from_image(
 use cgmath::Vector3;
 use winit::window::Icon;
 
+use crate::texture::Texture;
+
 pub fn load_icon(path: &str) -> Icon {
     let img = image::open(path).expect("error opening image").to_rgba8();
     let (width, height) = img.dimensions();
@@ -132,4 +134,76 @@ pub fn normal_from_transform(
     use cgmath::InnerSpace;
     use cgmath::Transform;
     mirror_transform.transform_vector(local_normal).normalize()
+}
+
+pub fn create_texture_from_rgba(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    label: &str,
+) -> Texture {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        rgba,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * width),
+            rows_per_image: Some(height),
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some(label),
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        address_mode_w: wgpu::AddressMode::Repeat,
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
+        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+        ..Default::default()
+    });
+
+    Texture {
+        texture,
+        view,
+        sampler,
+    }
+}
+
+pub fn rgba_f32_to_u8(c: [f32; 4]) -> [u8; 4] {
+    fn to_u8(x: f32) -> u8 {
+        (x.clamp(0.0, 1.0) * 255.0).round() as u8
+    }
+
+    [to_u8(c[0]), to_u8(c[1]), to_u8(c[2]), to_u8(c[3])]
 }

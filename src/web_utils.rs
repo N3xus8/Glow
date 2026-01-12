@@ -127,5 +127,14 @@ cfg_if::cfg_if! {
                 }
             }
         }
+        
+        fn object_url_from_bytes(data: &[u8]) -> Result<String, JsValue> {
+            use web_sys::Blob;
+
+            let array = js_sys::Uint8Array::from(data);
+            let blob = Blob::new_with_u8_array_sequence(&array.into())?;
+            let url = web_sys::Url::create_object_url_with_blob(&blob)?;
+            Ok(url)
+        }
     }
 }
