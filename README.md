@@ -74,6 +74,6 @@ If you run MSAA (i.e sample = 4), you need to run the code in a browser that sup
 
 ### **Check this out:** 
 
-![Watch the pic]
+![Watch the pic](fly_glow.gif)
 
 
