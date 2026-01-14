@@ -1,9 +1,10 @@
 use anyhow::*;
 use image::GenericImageView;
+use wgpu::TextureUsages;
 
-use crate::utils::create_texture_from_rgba;
+use crate::{pipeline::compute_pipeline, utils::create_texture_from_rgba};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::utils::{load_image, create_texture_from_image};
+use crate::utils::{create_texture_from_image, load_image};
 #[cfg(target_arch = "wasm32")]
 use crate::web_utils::load_texture_from_image_web;
 #[cfg(target_arch = "wasm32")]
@@ -23,6 +24,8 @@ impl Texture {
         queue: &wgpu::Queue,
         url: &str,
     ) -> Result<Self> {
+
+
         #[cfg(target_arch = "wasm32")]
         let texture = load_texture_from_image_web(device, queue, url)
             .await
@@ -418,7 +421,6 @@ impl Texture {
         texture
 
     }
-
 }
     
 
@@ -508,3 +510,195 @@ impl ColorTexture {
         Self { texture, view }
     }
 }
+
+
+
+    pub fn create_texture_from_image_mipmap(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        img: image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    ) -> anyhow::Result<wgpu::Texture> {
+        let width = img.width();
+        let height = img.height();
+
+        let texture_size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+
+        let mip_level_count = (width.max(height) as f32).log2().floor() as u32 + 1;
+
+        let texture_descr = wgpu::TextureDescriptor {
+            label: Some("MipMap Texture Image"),
+            size: texture_size,
+            mip_level_count,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            // TEXTURE_BINDING is required to use it in shaders
+            // COPY_DST is required to copy data into it
+            // RENDER_ATTACHMENT is required for copy_external_image_to_texture on some backends
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            view_formats: &[],
+        };
+
+        let texture = device.create_texture(&texture_descr);
+
+
+        queue.write_texture(
+            // Tells wgpu where to copy the pixel data
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture, // Destination
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &img, // RGBA8 bytes
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(img.width() * 4),
+                rows_per_image: Some(img.height()),
+            },
+            texture_size,
+        );
+
+
+        Ok(texture)
+    }
+
+
+    pub async fn get_texture_from_image_mipmap(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        queue: &wgpu::Queue,
+        url: &str,
+    ) -> Result<()> {
+
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let img = load_image(url)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let mip_level_count = (img.width().max(img.height()) as f32).log2().floor() as u32 + 1;
+        #[cfg(not(target_arch = "wasm32"))]
+        let diffuse_texture = create_texture_from_image_mipmap(device, queue, img )?;
+
+        let bind_group_layout = bind_group_layout_for_mipmap_texture(&device, &config);
+
+        let texture_width = diffuse_texture.width();
+        let texture_height = diffuse_texture.height();
+
+        let mipmap_pipeline = compute_pipeline(device, "mipmap_compute");
+
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("frame_encoder"),
+        });
+
+
+        for src_mip in 0..(mip_level_count - 1) {
+            let src_view = diffuse_texture.create_view(&wgpu::TextureViewDescriptor {
+                base_mip_level: src_mip,
+                mip_level_count: Some(1),
+                base_array_layer: 0,
+                array_layer_count: Some(1),
+                dimension: Some(wgpu::TextureViewDimension::D2),
+                format: None,
+                aspect: wgpu::TextureAspect::All,
+                label: Some("mip_src_view"),
+                ..Default::default()
+            });
+
+            let dst_view = diffuse_texture.create_view(&wgpu::TextureViewDescriptor {
+                base_mip_level: src_mip + 1,
+                mip_level_count: Some(1),
+                base_array_layer: 0,
+                array_layer_count: Some(1),
+                dimension: Some(wgpu::TextureViewDimension::D2),
+                format: None,
+                aspect: wgpu::TextureAspect::All,
+                label: Some("mip_dst_view"),
+                ..Default::default()
+            });
+
+
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&src_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&dst_view),
+                    },
+                ],
+                label: Some("mipmap_bindgroup"),
+            });
+
+            let mip_width = (texture_width >> src_mip).max(1);
+            let mip_height = (texture_height >> src_mip).max(1);
+
+            let invocation_x = (mip_width + 1) / 2;
+            let invocation_y = (mip_height + 1) / 2;
+
+            let workgroup_count_x =
+                (invocation_x + 7) / 8;
+            let workgroup_count_y =
+                (invocation_y + 7) / 8;
+
+            let mut compute_pass =
+                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("mipmap_compute"),
+                    ..Default::default()
+            });
+
+            compute_pass.set_pipeline(&mipmap_pipeline);
+
+            compute_pass.set_bind_group(0, &bind_group, &[]);
+            compute_pass.dispatch_workgroups(workgroup_count_x, workgroup_count_y, 1);
+
+
+        }
+ 
+        queue.submit(Some(encoder.finish()));
+
+        Ok(())
+
+    }
+
+    pub fn bind_group_layout_for_mipmap_texture(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+    ) -> wgpu::BindGroupLayout {
+
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::WriteOnly,
+                            format: config.format,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                ],
+                label: Some("mipmap_bind_group_layout"),
+            })  
+
+    }

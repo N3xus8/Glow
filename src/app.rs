@@ -59,11 +59,11 @@ impl ApplicationHandler<State> for App {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            // use crate::utils::load_icon;
+            //use crate::utils::load_icon;
 
             //let window_icon: Option<winit::window::Icon> = Some(load_icon("./assets/icon.png"));
             window_attributes = window_attributes.with_title("Ubik says Learn WGPU");
-            //.with_window_icon(window_icon);
+             //.with_window_icon(window_icon);
         }
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());

@@ -14,6 +14,7 @@ Glowing/Blooming silhouette & edges.🔥
 * HDR 🔥
 * Tone Mapping 🔥
 * Blur Horizontal/Vertical 🔥
+* gtlf loader 🔥
 
 ### Versions I used:
 

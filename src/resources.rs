@@ -222,9 +222,10 @@ pub async fn load_model_gtlf(
     let document = gltf.clone().document;
     let blob = gltf.clone().blob;
 
-    let base_path = Some(std::path::Path::new("/home/ubik/Programming/Rust/wgpu/glow/res/models/")) ;
+    let base_path = Some(std::path::Path::new(env!("OUT_DIR"))
+                            .join("res/models"));
     
-    let buffers = gltf::import_buffers(&document, base_path, blob.clone())?;
+    let buffers = gltf::import_buffers(&document, base_path.as_deref(), blob.clone())?;
     
     let meshes: Vec<model::Mesh> = gltf
         .meshes()
@@ -341,12 +342,6 @@ pub async fn load_model_gtlf(
                     let path = std::path::Path::new(env!("OUT_DIR"))
                             .join("res")
                             .join(file_name);
-
-                    if uri.ends_with(".bin") {
-                        println!("{}", uri);
-                    } else {
-                        println!("{}", uri);
-                    }
 
                     if path.exists() {
                         println!("Info: texture file found");

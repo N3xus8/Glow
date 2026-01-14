@@ -20,6 +20,9 @@ pub fn create_texture_from_image(
         height,
         depth_or_array_layers: 1,
     };
+
+
+
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("Image Texture"),
         size: texture_size,

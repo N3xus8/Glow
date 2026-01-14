@@ -550,4 +550,25 @@ pub fn edge_pipeline(
             pipeline: render_pipeline,
         })       
     }
+
+
 }
+
+    pub fn compute_pipeline(
+        device: &wgpu::Device,
+        label: &str
+    )  -> wgpu::ComputePipeline    {
+
+
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/mipmap_compute.wgsl"));
+
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some(label),
+            layout: None,
+            module: &shader,
+            entry_point: None,
+            compilation_options: Default::default(),
+            cache: Default::default(),
+        })
+
+    }
