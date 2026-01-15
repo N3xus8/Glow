@@ -128,13 +128,87 @@ cfg_if::cfg_if! {
             }
         }
         
-        fn object_url_from_bytes(data: &[u8]) -> Result<String, JsValue> {
+    pub    fn object_url_from_bytes(data: &[u8]) -> Result<String, JsValue> {
             use web_sys::Blob;
 
             let array = js_sys::Uint8Array::from(data);
             let blob = Blob::new_with_u8_array_sequence(&array.into())?;
             let url = web_sys::Url::create_object_url_with_blob(&blob)?;
             Ok(url)
+        }
+
+    pub async fn load_texture_from_image_mipmap_web(
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            url: &str
+        ) -> Result<wgpu::Texture, JsValue> {
+
+            // 1. Load Image (Same helper as above)
+
+            let promise = load_image(url);
+
+            match wasm_bindgen_futures::JsFuture::from(promise).await
+            {
+               Ok(result) => {
+                    let img: HtmlImageElement = result.dyn_into()?;
+
+                    let width = img.width();
+                    let height = img.height();
+
+                    let mip_level_count = (width.max(height) as f32).log2().floor() as u32 + 1;
+                   
+                    // 2. Create the WGPU Texture
+                    let texture_size = wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    };
+
+                    let texture = device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("Image Texture"),
+                        size: texture_size,
+                        mip_level_count,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        // TEXTURE_BINDING is required to use it in shaders
+                        // COPY_DST is required to copy data into it
+                        // RENDER_ATTACHMENT is required for copy_external_image_to_texture on some backends
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING
+                            | wgpu::TextureUsages::COPY_DST
+                            | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        view_formats: &[],
+                    });
+
+                    // 3. The Magic: Copy directly from DOM element to WGPU Texture
+                    let image_source = wgpu::CopyExternalImageSourceInfo {
+                        source: ExternalImageSource::HTMLImageElement(img),
+                        origin: wgpu::Origin2d::ZERO,
+                        flip_y: true, // Flip if your UVs require it
+                    };
+
+                    let image_destination = wgpu::CopyExternalImageDestInfo {
+                            texture: &texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                            color_space: wgpu::PredefinedColorSpace::Srgb,
+                            premultiplied_alpha: false,
+                        };
+                    queue.copy_external_image_to_texture(
+                        &image_source,
+                        image_destination,
+                        texture_size,
+                    );
+
+                    Ok(texture)
+                }
+
+               Err(e) => {
+                log::error!("Promise rejected: {:?}", e);
+                return Err(e);
+                }
+            }
         }
     }
 }

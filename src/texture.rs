@@ -6,7 +6,7 @@ use crate::{pipeline::compute_pipeline, utils::create_texture_from_rgba};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::utils::{create_texture_from_image, load_image};
 #[cfg(target_arch = "wasm32")]
-use crate::web_utils::load_texture_from_image_web;
+use crate::web_utils::{load_texture_from_image_web, load_texture_from_image_mipmap_web, object_url_from_bytes};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::UnwrapThrowExt;
 
@@ -397,12 +397,30 @@ impl Texture {
             device: &wgpu::Device,
             queue: &wgpu::Queue,
             data: &[u8],
-        ) -> Result<wgpu::Texture, JsValue> {
+        ) -> Result<Texture, JsValue> {
             let url = object_url_from_bytes(data)?;
             let texture = load_texture_from_image_web(device, queue, &url).await?;
             web_sys::Url::revoke_object_url(&url)?;
-            Ok(texture)
-        }
+
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
+
+        std::result::Result::Ok(Texture {
+            texture,
+            view,
+            sampler,
+        })
+    }
 
 
     pub async fn load_texture_from_buffer(    
@@ -412,20 +430,30 @@ impl Texture {
     ) -> Result<Texture> {
 
 
-        #[cfg(not(target_arch = "wasm32"))]
         let texture = Self::load_texture_from_buffer_native(data, device, queue);
 
-        #[cfg(target_arch = "wasm32")]
-        let texture = Self::load_texture_from_gltf_buffer_web(device, queue, data);
 
         texture
 
     }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn load_texture_from_buffer_web(    
+        data: &[u8],
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Texture, wasm_bindgen::JsValue> {
+
+   
+        let texture = Self::load_texture_from_gltf_buffer_web(device, queue, data).await;
+
+        texture
+
+    }
+
+
 }
     
-
-
-
 
 pub fn create_multisampled_view(
     device: &wgpu::Device,
@@ -577,11 +605,17 @@ impl ColorTexture {
         url: &str,
     ) -> Result<()> {
 
+        #[cfg(target_arch = "wasm32")]
+        let diffuse_texture = load_texture_from_image_mipmap_web(device, queue, url)
+            .await
+            .map_err(|e| log::error!("texture error {:?} ", e))
+            .unwrap_throw();
+
 
         #[cfg(not(target_arch = "wasm32"))]
         let img = load_image(url)?;
-        #[cfg(not(target_arch = "wasm32"))]
-        let mip_level_count = (img.width().max(img.height()) as f32).log2().floor() as u32 + 1;
+//        #[cfg(not(target_arch = "wasm32"))]
+//        let mip_level_count = (img.width().max(img.height()) as f32).log2().floor() as u32 + 1;
         #[cfg(not(target_arch = "wasm32"))]
         let diffuse_texture = create_texture_from_image_mipmap(device, queue, img )?;
 
@@ -589,6 +623,7 @@ impl ColorTexture {
 
         let texture_width = diffuse_texture.width();
         let texture_height = diffuse_texture.height();
+        let mip_level_count = (texture_width.max(texture_height) as f32).log2().floor() as u32 + 1;
 
         let mipmap_pipeline = compute_pipeline(device, "mipmap_compute");
 

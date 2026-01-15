@@ -5,6 +5,9 @@ use wgpu::util::DeviceExt;
 use crate::{model, texture::{self, Texture}, utils::rgba_f32_to_u8};
 
 #[cfg(target_arch = "wasm32")]
+use wasm_bindgen::UnwrapThrowExt;
+
+#[cfg(target_arch = "wasm32")]
 fn format_url(file_name: &str) -> reqwest::Url {
     let window = web_sys::window().unwrap();
     let location = window.location();
@@ -334,8 +337,14 @@ pub async fn load_model_gtlf(
                     
                     println!("Info: texture bin  found");
 
-                    // embedded buffer
-                    Texture::load_texture_from_buffer(image_bytes, device, queue).await?
+                    cfg_if::cfg_if! {
+                        // embedded buffer
+                        if #[cfg(not(target_arch = "wasm32"))]{
+                            Texture::load_texture_from_buffer(image_bytes, device, queue).await?
+                        } else {
+                            Texture::load_texture_from_buffer_web(image_bytes, device, queue).await.unwrap_throw()
+                        }
+                    }
                 },
                 gltf::image::Source::Uri { uri, mime_type: _ } => {
 
